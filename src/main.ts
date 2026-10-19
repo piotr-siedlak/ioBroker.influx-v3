@@ -196,7 +196,15 @@ export class InfluxV3Adapter extends utils.Adapter {
 
     private async onUnload(callback: () => void): Promise<void> {
         this.stopping = true;
-        const guard = setTimeout(() => callback(), 9000);
+        // js-controller must get exactly one callback, at the latest shortly before common.stopTimeout
+        let done = false;
+        const finish = (): void => {
+            if (!done) {
+                done = true;
+                callback();
+            }
+        };
+        const guard = setTimeout(finish, 9000);
         try {
             this.clearInterval(this.pingTimer);
             this.clearInterval(this.statsTimer);
@@ -220,7 +228,7 @@ export class InfluxV3Adapter extends utils.Adapter {
             this.log.error(`Error during shutdown: ${redact(e)}`);
         } finally {
             clearTimeout(guard);
-            callback();
+            finish();
         }
     }
 
@@ -513,9 +521,7 @@ export class InfluxV3Adapter extends utils.Adapter {
             this.scheduleEnumReload();
             return;
         }
-        if (id.startsWith('system.') && !this.registry.has(id)) {
-            return;
-        }
+        // system.* states (e.g. system.adapter.x.0.memRss) can be logged too, so no prefix filter here
         const custom = this.customOf(obj);
         if (!this.registry.has(id) && !custom?.enabled) {
             return; // not ours - O(1) exit for the '*' subscription
