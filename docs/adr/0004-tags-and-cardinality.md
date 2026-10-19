@@ -4,6 +4,14 @@ Status: accepted (2026-10-19)
 
 ## Decision
 
+* **Tag catalog (added after 0.1.0, owner request):** tag keys are defined once per instance (`tagDefinitions`:
+  key, allowed values, *other values allowed*, default for all states, description). The object dialog offers only
+  catalog keys (`selectSendTo getTagKeys`) and suggests the allowed values (`autocompleteSendTo getTagValues`);
+  validators read `instanceObj.native.tagDefinitions`, so the rules also apply when the instance is stopped. The
+  runtime enforces the same rules (`checkTagAgainstCatalog`). Goal: one standard vocabulary of tags across all
+  objects (and therefore stable Grafana filters). The former "global tags" table is converted once into catalog
+  entries with defaults and saved in the instance settings.
+
 * Layers and precedence: see `docs/ARCHITECTURE.md` (defaults → global → automatic → per-state → explicit
   removal → reserved).
 * Key normalisation (`tagKeyStyle`): `snake` (default: lower case, every char outside `[a-z0-9_]` → `_`,

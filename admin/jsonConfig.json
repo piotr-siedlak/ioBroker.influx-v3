@@ -903,12 +903,12 @@
             "type": "panel",
             "label": "tab_tags",
             "items": {
-                "globalTags": {
+                "tagDefinitions": {
                     "type": "table",
                     "newLine": true,
                     "sm": 12,
-                    "label": "Global tags",
-                    "help": "tip_Global tags",
+                    "label": "Tag catalog",
+                    "help": "tip_tag_catalog",
                     "uniqueColumns": [
                         "key"
                     ],
@@ -916,7 +916,7 @@
                         {
                             "type": "text",
                             "attr": "key",
-                            "width": "40%",
+                            "width": "18%",
                             "default": "",
                             "title": "Tag key",
                             "placeholder": "location",
@@ -926,14 +926,35 @@
                         },
                         {
                             "type": "text",
-                            "attr": "value",
-                            "width": "60%",
+                            "attr": "values",
+                            "width": "32%",
                             "default": "",
-                            "title": "Tag value",
-                            "placeholder": "KOTLOWNIA",
-                            "validator": "!(data.key || '').trim() || !!(data.value || '').trim()",
-                            "validatorErrorText": "err_tagvalue",
+                            "title": "Allowed values (comma separated)",
+                            "placeholder": "KOTLOWNIA, SALON, GARAZ"
+                        },
+                        {
+                            "type": "checkbox",
+                            "attr": "allowOther",
+                            "width": "10%",
+                            "default": false,
+                            "title": "Other values allowed"
+                        },
+                        {
+                            "type": "text",
+                            "attr": "defaultValue",
+                            "width": "15%",
+                            "default": "",
+                            "title": "Default for all states",
+                            "validator": "!(data.defaultValue || '').trim() || data.allowOther === true || String(data.values || '').split(',').map(v => v.trim()).includes((data.defaultValue || '').trim())",
+                            "validatorErrorText": "err_default_not_allowed",
                             "validatorNoSaveOnError": true
+                        },
+                        {
+                            "type": "text",
+                            "attr": "description",
+                            "width": "25%",
+                            "default": "",
+                            "title": "Description"
                         }
                     ],
                     "xs": 12,
@@ -1179,7 +1200,7 @@
                 },
                 "_tpl": {
                     "type": "staticText",
-                    "text": "txt_templates",
+                    "text": "txt_templates_catalog",
                     "newLine": true,
                     "sm": 12,
                     "xs": 12,

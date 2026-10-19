@@ -20,6 +20,14 @@ import { checkReadOnlySql } from '../../src/lib/queryService';
 import { Spool } from '../../src/lib/spool';
 import { type QueueOptions, WriteQueue } from '../../src/lib/writeQueue';
 
+/** Node timers for code outside the adapter (tests, scripts) */
+const nodeTimers = {
+    now: (): number => Date.now(),
+    after: (fn: () => void, ms: number): unknown => setTimeout(fn, ms),
+    cancel: (h: unknown): void => clearTimeout(h as NodeJS.Timeout),
+    random: (): number => Math.random(),
+};
+
 const URL = process.env.INFLUX3_URL;
 const TOKEN = process.env.INFLUX3_TOKEN;
 const CONTAINER = process.env.INFLUX3_CONTAINER;
@@ -402,11 +410,16 @@ export const GRAFANA_RANGE = "time >= TIMESTAMP '2026-10-19T09:00:00Z' AND time 
             const c = new InfluxV3Client(options({ timeoutMs: 1000 }));
             let written = 0;
             const conn: boolean[] = [];
-            const q = new WriteQueue(queueOptions(), c, {
-                ...noEvents,
-                written: n => (written += n),
-                connection: ok => conn.push(ok),
-            });
+            const q = new WriteQueue(
+                queueOptions(),
+                c,
+                {
+                    ...noEvents,
+                    written: n => (written += n),
+                    connection: ok => conn.push(ok),
+                },
+                nodeTimers,
+            );
             await q.start();
             execFileSync('docker', ['pause', CONTAINER]);
             try {
@@ -456,6 +469,7 @@ export const GRAFANA_RANGE = "time >= TIMESTAMP '2026-10-19T09:00:00Z' AND time 
                 queueOptions({ bufferMode: 'disk' }),
                 c,
                 { ...noEvents, written: n => (written += n) },
+                nodeTimers,
                 new Spool(dir, true),
             );
             const recovered = await q.start();

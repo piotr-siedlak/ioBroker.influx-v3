@@ -104,7 +104,7 @@ Share of time "on" (duty cycle, assuming regular sampling): `avg(CAST(value AS D
 ### 6. Filtering by `room`, `device`, `unit`, `adapter`
 
 Enable the automatic tags *room*, *unit*, *adapter* in the instance settings (tab *Tags*); `device` is a per-state or
-global tag here (or the automatic *device* = name of the parent device object).
+catalog tag here (or the automatic *device* = name of the parent device object).
 
 ```sql
 SELECT time, state_id, value

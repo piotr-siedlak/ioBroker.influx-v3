@@ -45,6 +45,7 @@ exports.InfluxV3Adapter = void 0;
  */
 const utils = __importStar(require("@iobroker/adapter-core"));
 const node_path_1 = __importDefault(require("node:path"));
+const promises_1 = require("node:timers/promises");
 const config_1 = require("./lib/config");
 const filterPipeline_1 = require("./lib/filterPipeline");
 const historyService_1 = require("./lib/historyService");
@@ -94,6 +95,9 @@ class InfluxV3Adapter extends utils.Adapter {
     }
     // ------------------------------------------------------------------ lifecycle
     async onReady() {
+        if (await this.migrateGlobalTagsToCatalog()) {
+            return; // js-controller restarts the instance with the converted settings
+        }
         const { config, warnings } = (0, config_1.normalizeInstanceConfig)(this.config);
         this.cfg = config;
         (0, redact_1.registerSecret)(config.token);
@@ -134,7 +138,7 @@ class InfluxV3Adapter extends utils.Adapter {
             },
             connection: (ok, error) => this.setConnected(ok, error),
             log: (level, message) => this.log[level]((0, redact_1.redact)(message)),
-        }, spool);
+        }, this.timers(), spool);
         try {
             await this.queue.start();
         }
@@ -153,44 +157,80 @@ class InfluxV3Adapter extends utils.Adapter {
         await this.publishStats();
         this.log.info(`InfluxDB 3 adapter ready: ${this.registry.size} state(s) logged into database "${config.database}" (${config.schemaMode} mode, ${config.bufferMode} buffer)`);
     }
-    async onUnload(callback) {
-        this.stopping = true;
-        // js-controller must get exactly one callback, at the latest shortly before common.stopTimeout
-        let done = false;
-        const finish = () => {
-            if (!done) {
-                done = true;
-                callback();
-            }
+    /** Managed adapter timers (cleared by js-controller on unload) for the queue and the filters */
+    timers() {
+        return {
+            now: () => Date.now(),
+            after: (fn, ms) => this.setTimeout(fn, ms),
+            cancel: h => this.clearTimeout(h),
+            random: () => Math.random(),
         };
-        const guard = setTimeout(finish, 9000);
+    }
+    /**
+     * One-time conversion of the former "global tags" table into the tag catalog, saved in the
+     * instance settings so that Admin shows it. Returns true when the settings were changed.
+     */
+    async migrateGlobalTagsToCatalog() {
+        const native = this.config;
+        const legacy = (0, config_1.tableRows)(native.globalTags);
+        const catalog = (0, config_1.tableRows)(native.tagDefinitions);
+        if (!legacy.length || catalog.length) {
+            return false;
+        }
+        const tagDefinitions = legacy
+            .filter(t => typeof t?.key === 'string' && t.key.trim())
+            .map(t => ({
+            key: String(t.key).trim(),
+            values: '',
+            allowOther: true,
+            defaultValue: typeof t.value === 'string' ? t.value.trim() : '',
+            description: '',
+        }));
         try {
-            this.clearInterval(this.pingTimer);
-            this.clearInterval(this.statsTimer);
-            this.clearTimeout(this.enumReloadTimer);
-            for (const reg of this.registry.values()) {
-                reg.pipeline.flushPending();
-                reg.pipeline.stop();
+            // read-modify-write: extendObject would merge the arrays element by element
+            const obj = await this.getForeignObjectAsync(`system.adapter.${this.namespace}`);
+            if (!obj) {
+                return false;
             }
-            if (this.queue) {
-                const { persisted, lost } = await this.queue.shutdown(this.cfg?.shutdownFlushTimeoutMs ?? 5000);
-                if (persisted) {
-                    this.log.info(`${persisted} record(s) kept in the disk buffer for the next start`);
-                }
-                if (lost) {
-                    this.log.warn(`${lost} record(s) could not be written before shutdown`);
-                }
-            }
-            this.client?.close();
-            await this.setStateAsync('info.connection', false, true).catch(() => undefined);
+            obj.native = { ...obj.native, tagDefinitions, globalTags: [] };
+            await this.setForeignObjectAsync(obj._id, obj);
+            this.log.info(`${tagDefinitions.length} global tag(s) moved into the tag catalog - restarting with the new settings`);
+            return true;
         }
         catch (e) {
-            this.log.error(`Error during shutdown: ${(0, redact_1.redact)(e)}`);
+            this.log.warn(`Cannot save the tag catalog (${(0, redact_1.redact)(e)}) - global tags are converted in memory only`);
+            return false;
         }
-        finally {
-            clearTimeout(guard);
-            finish();
+    }
+    async onUnload(callback) {
+        this.stopping = true;
+        // js-controller must get the callback at the latest shortly before common.stopTimeout (10 s).
+        // Adapter timers are refused while stopping, so the limit is an abortable promise delay.
+        const abort = new AbortController();
+        const work = this.shutdown().catch(e => this.log.error(`Error during shutdown: ${(0, redact_1.redact)(e)}`));
+        await Promise.race([work, (0, promises_1.setTimeout)(9000, undefined, { signal: abort.signal }).catch(() => undefined)]);
+        abort.abort();
+        callback();
+    }
+    async shutdown() {
+        this.clearInterval(this.pingTimer);
+        this.clearInterval(this.statsTimer);
+        this.clearTimeout(this.enumReloadTimer);
+        this.queue?.beginShutdown();
+        for (const reg of this.registry.values()) {
+            reg.pipeline.shutdown(); // writes values waiting in debounce/block windows, starts no new timers
         }
+        if (this.queue) {
+            const { persisted, lost } = await this.queue.shutdown(this.cfg?.shutdownFlushTimeoutMs ?? 5000);
+            if (persisted) {
+                this.log.info(`${persisted} record(s) kept in the disk buffer for the next start`);
+            }
+            if (lost) {
+                this.log.warn(`${lost} record(s) could not be written before shutdown`);
+            }
+        }
+        this.client?.close();
+        await this.setStateAsync('info.connection', false, true).catch(() => undefined);
     }
     createClient(config) {
         return new influxClient_1.InfluxV3Client({
@@ -473,6 +513,7 @@ class InfluxV3Adapter extends utils.Adapter {
         if (!this.registry.has(id) && !custom?.enabled) {
             return; // not ours - O(1) exit for the '*' subscription
         }
+        const enabledAt = Date.now();
         // serialise changes per id
         const prev = this.objectChains.get(id) ?? Promise.resolve();
         const next = prev
@@ -484,7 +525,7 @@ class InfluxV3Adapter extends utils.Adapter {
                     await this.updateSubscriptions();
                     const reg = this.registry.get(id);
                     if (reg) {
-                        await this.initialValue(reg);
+                        await this.initialValue(reg, enabledAt);
                     }
                 }
             }
@@ -658,7 +699,7 @@ class InfluxV3Adapter extends utils.Adapter {
             this.storeIdToReal.delete(existing.storeId);
         }
         const pipeline = existing?.pipeline ??
-            new filterPipeline_1.FilterPipeline(m.cfg, (s, reason) => this.write(id, s, reason), `system.adapter.${this.namespace}`);
+            new filterPipeline_1.FilterPipeline(m.cfg, (s, reason) => this.write(id, s, reason), `system.adapter.${this.namespace}`, this.timers());
         if (existing) {
             pipeline.update(m.cfg);
         }
@@ -675,6 +716,7 @@ class InfluxV3Adapter extends utils.Adapter {
             conflict,
             warnings: m.warnings,
             pipeline,
+            lastSeenTs: existing?.lastSeenTs,
         };
         this.registry.set(id, reg);
         this.storeIdToReal.set(m.storeId, id);
@@ -786,10 +828,25 @@ class InfluxV3Adapter extends utils.Adapter {
         }
     }
     subscribedIds = new Set();
-    async initialValue(reg) {
+    /**
+     * Reads the current value of a newly registered state.
+     *
+     * @param reg registration
+     * @param enabledAt when logging was enabled while running: a value changed after that moment may have been
+     *     set before the subscription was active, so it is logged like a state change instead of becoming the
+     *     baseline of the filters
+     */
+    async initialValue(reg, enabledAt) {
         try {
             const st = await this.getForeignStateAsync(reg.id);
             if (!st || this.registry.get(reg.id) !== reg) {
+                return;
+            }
+            if (reg.lastSeenTs !== undefined && reg.lastSeenTs >= st.ts) {
+                return; // the subscription already delivered this (or a newer) value
+            }
+            if (enabledAt !== undefined && st.ts >= enabledAt) {
+                this.onStateChange(reg.id, st);
                 return;
             }
             const prepared = this.prepare(reg, st);
@@ -810,6 +867,7 @@ class InfluxV3Adapter extends utils.Adapter {
         if (!reg || !state || this.stopping) {
             return;
         }
+        reg.lastSeenTs = Math.max(reg.lastSeenTs ?? 0, state.ts);
         this.stats.counters.received++;
         if (reg.conflict) {
             this.stats.counters.filtered++;
@@ -973,6 +1031,10 @@ class InfluxV3Adapter extends utils.Adapter {
                     return await this.handleCreateDatabase(msg);
                 case 'listInfluxdbInstances':
                     return await this.handleListInfluxdbInstances(msg);
+                case 'getTagKeys':
+                    return this.reply(msg, this.tagKeyOptions());
+                case 'getTagValues':
+                    return this.reply(msg, this.tagValueOptions(msg.message?.key));
                 case 'migrationPreview':
                     return await this.handleMigration(msg, false);
                 case 'migrationApply':
@@ -1138,7 +1200,8 @@ class InfluxV3Adapter extends utils.Adapter {
         }
         const options = { ...(m.options ?? {}), enabled: true };
         // validate with the same rules the runtime uses
-        const { warnings } = (0, config_1.normalizeStateConfig)(options, this.cfg, m.id);
+        const { config: stateCfg, warnings } = (0, config_1.normalizeStateConfig)(options, this.cfg, m.id);
+        warnings.push(...this.catalogWarnings(stateCfg.customTags));
         await this.writeCustomConfig(m.id, options);
         this.log.info(`enableHistory ${m.id} by ${msg.from}${warnings.length ? ` (warnings: ${warnings.join('; ')})` : ''}`);
         this.reply(msg, { success: true, warnings: warnings.length ? warnings : undefined });
@@ -1380,6 +1443,43 @@ class InfluxV3Adapter extends utils.Adapter {
         }
         this.reply(msg, { text: lines.join('\n'), style: check.ok ? undefined : { color: 'red' } });
     }
+    /** Options for the tag key dropdown of the per-state dialog (selectSendTo) */
+    tagKeyOptions() {
+        if (!this.cfg.tagDefinitions.length) {
+            return [{ value: '', label: 'No tag keys defined - add them in the instance settings (tab Tags)' }];
+        }
+        return this.cfg.tagDefinitions.map(d => ({
+            value: d.key,
+            label: d.description ? `${d.key} – ${d.description}` : d.key,
+        }));
+    }
+    /**
+     * Options for the tag value field of the per-state dialog (autocompleteSendTo).
+     *
+     * @param key selected tag key
+     */
+    tagValueOptions(key) {
+        const def = typeof key === 'string' ? this.cfg.tagDefinitions.find(d => d.key === key) : undefined;
+        if (!def) {
+            return [];
+        }
+        return def.values.map(v => ({ value: v, label: v === def.defaultValue ? `${v} (default)` : v }));
+    }
+    /**
+     * Warnings for per-state tags that the catalog does not allow.
+     *
+     * @param tags per-state tags
+     */
+    catalogWarnings(tags) {
+        const out = [];
+        for (const t of tags) {
+            const check = (0, tagResolver_1.checkTagAgainstCatalog)(t, this.cfg.tagDefinitions, this.cfg.tagKeyStyle);
+            if (!check.ok) {
+                out.push(`tag "${t.key}": ${check.reason} - it will be ignored`);
+            }
+        }
+        return out;
+    }
     async handleListInfluxdbInstances(msg) {
         const objs = await this.getForeignObjectsAsync('system.adapter.influxdb.*', 'instance');
         const list = Object.keys(objs).map(id => id.replace('system.adapter.', ''));
@@ -1399,12 +1499,26 @@ class InfluxV3Adapter extends utils.Adapter {
             ? new Set(m.ids.filter((x) => typeof x === 'string'))
             : undefined;
         const todo = preview.filter(p => (!p.alreadyConfigured || overwrite) && (!selected || selected.has(p.id)));
+        // custom tags of the classic adapter only work if their keys/values are in this instance's catalog
+        const notInCatalog = new Set();
+        for (const item of todo) {
+            const { config: stateCfg } = (0, config_1.normalizeStateConfig)(item.proposed, this.cfg, item.id);
+            for (const t of stateCfg.customTags) {
+                const check = (0, tagResolver_1.checkTagAgainstCatalog)(t, this.cfg.tagDefinitions, this.cfg.tagKeyStyle);
+                if (!check.ok) {
+                    notInCatalog.add(`${t.key}=${t.value}`);
+                }
+            }
+        }
         if (!apply) {
             const text = [
                 `${preview.length} state(s) are logged by ${source}.`,
                 `${todo.length} would be configured for ${this.namespace} (${preview.length - todo.length} already configured, skipped).`,
                 ...todo.slice(0, 30).map(p => `• ${p.id}`),
                 todo.length > 30 ? `… and ${todo.length - 30} more` : '',
+                notInCatalog.size
+                    ? `Tags not in the tag catalog (ignored until you add their keys/values in the Tags tab): ${[...notInCatalog].slice(0, 20).join(', ')}`
+                    : '',
                 `Settings of ${source} are not changed. Historical data is not copied.`,
             ]
                 .filter(Boolean)

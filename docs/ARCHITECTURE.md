@@ -58,9 +58,11 @@ ioBroker ───────────────────────�
 ## Tag precedence (lowest → highest)
 
 1. **defaults** – nothing besides the reserved `state_id` (applied last, cannot be overridden)
-2. **global tags** (instance table) – if `useGlobalTags`
+2. **catalog defaults** (instance tag catalog, column *default for all states*) – if `useGlobalTags`
 3. **automatic tags** (room, function, adapter, instance, device, channel, unit, role, name – each switched on globally) – if `useAutoTags`
-4. **per-state tags** (constants or templates; templates may contain dynamic placeholders)
+4. **per-state tags** – keys must exist in the instance **tag catalog**, values must be one of the key's allowed values
+   unless the key allows other values (then also templates and dynamic placeholders); violations are ignored with a
+   warning
 5. **explicit overrides** – `excludeTags` removes keys coming from any lower layer
 6. **reserved** – `state_id`; metadata tags (`ack`, `q`, `from`) when their placement is `tag`
 

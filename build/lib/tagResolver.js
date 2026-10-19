@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CardinalityGuard = void 0;
+exports.checkTagAgainstCatalog = checkTagAgainstCatalog;
 exports.normalizeTagKey = normalizeTagKey;
 exports.looksSensitive = looksSensitive;
 exports.sanitizeTagValue = sanitizeTagValue;
@@ -8,6 +9,32 @@ exports.evaluateTemplate = evaluateTemplate;
 exports.resolveTags = resolveTags;
 exports.resolveDynamicTags = resolveDynamicTags;
 const lineProtocol_1 = require("./lineProtocol");
+/**
+ * Checks one per-state tag against the instance tag catalog.
+ * Returns the catalog entry, or an error text when the key or the value is not allowed.
+ *
+ * @param tag per-state tag (key as entered, raw value incl. templates)
+ * @param catalog tag catalog of the instance
+ * @param style tag key style (keys are compared after normalisation)
+ */
+function checkTagAgainstCatalog(tag, catalog, style) {
+    const key = normalizeTagKey(tag.key, style);
+    const definition = catalog.find(d => normalizeTagKey(d.key, style) === key);
+    if (!definition) {
+        return {
+            ok: false,
+            reason: `key "${tag.key}" is not defined in the tag catalog of the instance (instance settings → Tags)`,
+        };
+    }
+    const value = tag.value.trim();
+    if (!definition.allowOther && !definition.values.includes(value)) {
+        return {
+            ok: false,
+            reason: `value "${value}" is not allowed for "${definition.key}" (allowed: ${definition.values.join(', ') || '-'})`,
+        };
+    }
+    return { ok: true, definition };
+}
 /**
  * Normalises a tag key according to the configured style.
  *
@@ -241,8 +268,13 @@ function resolveTags(ctx, settings) {
             add('auto', 'name', nameToString(ctx.common.name, ctx.language), true);
         }
     }
-    // per-state tags
+    // per-state tags: only keys (and values) of the instance tag catalog
     for (const t of st.customTags) {
+        const check = checkTagAgainstCatalog(t, inst.tagDefinitions, inst.tagKeyStyle);
+        if (!check.ok) {
+            warnings.push(`tag "${t.key}": ${check.reason} - ignored`);
+            continue;
+        }
         const ev = evaluateTemplate(t.value, ctx, inst.nativeAllowlist, warnings);
         if (ev.dynamicSources.length) {
             if (!inst.dynamicTagsEnabled) {

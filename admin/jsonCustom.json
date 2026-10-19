@@ -54,6 +54,20 @@
                     "lg": 6,
                     "xl": 6
                 },
+                "aliasId": {
+                    "type": "text",
+                    "label": "Alias ID",
+                    "tooltip": "tip_Alias ID",
+                    "help": "tip_Alias ID",
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 12,
+                    "maxLength": 255,
+                    "default": "",
+                    "xs": 12,
+                    "lg": 12,
+                    "xl": 12
+                },
                 "customTags": {
                     "type": "table",
                     "newLine": true,
@@ -63,28 +77,34 @@
                         "key"
                     ],
                     "label": "Tags of this state",
-                    "help": "tip_Tags of this state",
+                    "help": "tip_state_tags_catalog",
                     "items": [
                         {
-                            "type": "text",
+                            "type": "selectSendTo",
                             "attr": "key",
                             "width": "40%",
                             "default": "",
                             "title": "Tag key",
-                            "placeholder": "location",
-                            "validator": "!(data.key || '').trim() || (!['time','state_id','value','ack','q','from'].includes((data.key || '').trim().toLowerCase()) && !(data.key || '').trim().startsWith('_'))",
-                            "validatorErrorText": "err_tagkey",
+                            "command": "getTagKeys",
+                            "noTranslation": true,
+                            "validator": "const defs = (instanceObj && instanceObj.native && Array.isArray(instanceObj.native.tagDefinitions)) ? instanceObj.native.tagDefinitions : []; const k = (data.key || '').trim(); return !k || defs.some(d => (d.key || '').trim() === k);",
+                            "validatorErrorText": "err_key_not_in_catalog",
                             "validatorNoSaveOnError": true
                         },
                         {
-                            "type": "text",
+                            "type": "autocompleteSendTo",
                             "attr": "value",
                             "width": "60%",
                             "default": "",
                             "title": "Tag value",
-                            "placeholder": "KOTLOWNIA",
-                            "validator": "!(data.key || '').trim() || !!(data.value || '').trim()",
-                            "validatorErrorText": "err_tagvalue",
+                            "command": "getTagValues",
+                            "jsonData": "{\"key\": \"${data.key}\"}",
+                            "alsoDependsOn": [
+                                "key"
+                            ],
+                            "freeSolo": true,
+                            "validator": "const defs = (instanceObj && instanceObj.native && Array.isArray(instanceObj.native.tagDefinitions)) ? instanceObj.native.tagDefinitions : []; const k = (data.key || '').trim(); const v = (data.value || '').trim(); if (!k) { return !v; } const d = defs.find(x => (x.key || '').trim() === k); if (!d || !v) { return false; } return d.allowOther === true || String(d.values || '').split(',').map(x => x.trim()).includes(v);",
+                            "validatorErrorText": "err_value_not_in_catalog",
                             "validatorNoSaveOnError": true
                         }
                     ],
@@ -445,20 +465,6 @@
             "type": "panel",
             "label": "ctab_advanced",
             "items": {
-                "aliasId": {
-                    "type": "text",
-                    "label": "Alias ID",
-                    "tooltip": "tip_Alias ID",
-                    "help": "tip_Alias ID",
-                    "newLine": true,
-                    "sm": 12,
-                    "md": 6,
-                    "maxLength": 255,
-                    "default": "",
-                    "xs": 12,
-                    "lg": 6,
-                    "xl": 6
-                },
                 "field": {
                     "type": "text",
                     "label": "Value column (per-state mode)",

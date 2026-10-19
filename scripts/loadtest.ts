@@ -22,6 +22,14 @@ import { Spool } from '../src/lib/spool';
 import { resolveTags } from '../src/lib/tagResolver';
 import { type QueueOptions, WriteQueue } from '../src/lib/writeQueue';
 
+/** Node timers for code outside the adapter (tests, scripts) */
+const nodeTimers = {
+    now: (): number => Date.now(),
+    after: (fn: () => void, ms: number): unknown => setTimeout(fn, ms),
+    cancel: (h: unknown): void => clearTimeout(h as NodeJS.Timeout),
+    random: (): number => Math.random(),
+};
+
 const URL = process.env.INFLUX3_URL ?? '';
 const TOKEN = process.env.INFLUX3_TOKEN ?? '';
 const counts = (process.argv[2] ?? '100,1000,10000').split(',').map(Number);
@@ -101,17 +109,29 @@ async function run(states: number, scenario: 'constant' | 'burst', db: string): 
             return r;
         },
     };
-    const queue = new WriteQueue(queueOpts, target, {
-        written: n => (written += n),
-        rejected: items => (rejected += items.length),
-        dropped: n => (dropped += n),
-        connection: () => undefined,
-        log: () => undefined,
-    });
+    const queue = new WriteQueue(
+        queueOpts,
+        target,
+        {
+            written: n => (written += n),
+            rejected: items => (rejected += items.length),
+            dropped: n => (dropped += n),
+            connection: () => undefined,
+            log: () => undefined,
+        },
+        nodeTimers,
+    );
     await queue.start();
 
     const tagSettings = {
-        instance: { ...DEFAULT_INSTANCE_CONFIG, globalTags: [{ key: 'site', value: 'loadtest' }] },
+        instance: {
+            ...DEFAULT_INSTANCE_CONFIG,
+            globalTags: [{ key: 'site', value: 'loadtest' }],
+            tagDefinitions: [
+                { key: 'site', values: ['loadtest'], allowOther: false, defaultValue: 'loadtest', description: '' },
+                { key: 'device', values: [], allowOther: true, defaultValue: '', description: '' },
+            ],
+        },
         state: {
             customTags: [{ key: 'device', value: '{id.segment[2]}' }],
             excludeTags: [],
@@ -161,6 +181,7 @@ async function run(states: number, scenario: 'constant' | 'burst', db: string): 
                     );
                 },
                 'system.adapter.influx-v3.0',
+                nodeTimers,
             ),
         );
     }
@@ -260,6 +281,7 @@ async function spoolRebuild(
             connection: () => undefined,
             log: () => undefined,
         },
+        nodeTimers,
         new Spool(dir, false),
     );
     const t0 = Date.now();

@@ -71,6 +71,16 @@ function sendTo(harness, command, message, instance = 'influx-v3.0') {
     return new Promise(resolve => harness.sendTo(instance, command, message, resolve));
 }
 
+/** tag catalog used by the end-to-end tests */
+const CATALOG = [
+    { key: 'Location', values: 'KOTLOWNIA, SALON', allowOther: false, defaultValue: '', description: 'room of the sensor' },
+    { key: 'Sub-Type', values: 'HC1, HC2, HC3', allowOther: false, defaultValue: '', description: '' },
+    { key: 'device', values: '', allowOther: true, defaultValue: '', description: 'templates allowed' },
+    { key: 'kind', values: 'early, late', allowOther: false, defaultValue: '', description: '' },
+    { key: 'inst', values: 'zero, one', allowOther: false, defaultValue: '', description: '' },
+    { key: 'site', values: 'home, second', allowOther: false, defaultValue: 'home', description: '' },
+];
+
 function stateObject(type, custom, extra = {}) {
     return {
         type: 'state',
@@ -97,6 +107,27 @@ tests.integration(path.join(__dirname, '..'), {
                 const inst = await harness.objects.getObjectAsync('system.adapter.influx-v3.0');
                 assert.notEqual(inst.native.token, 'apiv3_unit');
                 assert.ok(!harness.getLogs().some(l => l.message.includes('apiv3_unit')), 'token must not appear in logs');
+                await harness.stopAdapter();
+            });
+        });
+
+        suite('Former global tags are moved into the tag catalog', getHarness => {
+            it('converts globalTags once and saves them as tagDefinitions', async function () {
+                this.timeout(60000);
+                const harness = getHarness();
+                await harness.changeAdapterConfig('influx-v3', {
+                    native: { url: 'http://127.0.0.1:1', token: 'apiv3_unit', globalTags: [{ key: 'site', value: 'home' }], tagDefinitions: [] },
+                });
+                await harness.startAdapterAndWait();
+                const inst = await waitFor(async () => {
+                    const o = await harness.objects.getObjectAsync('system.adapter.influx-v3.0');
+                    return o.native.tagDefinitions.length ? o : null;
+                });
+                assert.deepEqual(inst.native.tagDefinitions, [
+                    { key: 'site', values: '', allowOther: true, defaultValue: 'home', description: '' },
+                ]);
+                assert.deepEqual(inst.native.globalTags, []);
+                assert.ok(harness.getLogs().some(l => l.message.includes('moved into the tag catalog')));
                 await harness.stopAdapter();
             });
         });
@@ -150,7 +181,7 @@ tests.integration(path.join(__dirname, '..'), {
                         token: TOKEN,
                         database: DB,
                         flushIntervalMs: 200,
-                        globalTags: [{ key: 'site', value: 'home' }],
+                        tagDefinitions: CATALOG,
                         autoTagChannel: true,
                         storeOnStart: false,
                     },
@@ -222,6 +253,46 @@ tests.integration(path.join(__dirname, '..'), {
                 assert.equal(dps[objects.num].table, 'numeric_states', 'preview does not change the configuration');
             });
 
+            it('the object dialog gets keys and values from the tag catalog', async function () {
+                this.timeout(20000);
+                const keys = await sendTo(harness, 'getTagKeys', {});
+                assert.deepEqual(
+                    keys.map(k => k.value),
+                    CATALOG.map(d => d.key),
+                );
+                assert.equal(keys[0].label, 'Location – room of the sensor');
+                const values = await sendTo(harness, 'getTagValues', { key: 'site' });
+                assert.deepEqual(values, [
+                    { value: 'home', label: 'home (default)' },
+                    { value: 'second', label: 'second' },
+                ]);
+                assert.deepEqual(await sendTo(harness, 'getTagValues', { key: 'unknown' }), []);
+            });
+
+            it('tags outside the catalog are ignored (with warnings), catalog tags are written', async function () {
+                this.timeout(30000);
+                const res = await sendTo(harness, 'enableHistory', {
+                    id: objects.later,
+                    options: {
+                        changesOnly: false,
+                        customTags: [
+                            { key: 'kind', value: 'early' },
+                            { key: 'bogus', value: 'x' },
+                            { key: 'Location', value: 'GARAZ' },
+                        ],
+                    },
+                });
+                assert.equal(res.success, true);
+                assert.equal(res.warnings.filter(w => w.includes('will be ignored')).length, 2);
+                await waitFor(async () => Object.keys(await sendTo(harness, 'getEnabledDPs', {})).includes(objects.later));
+                await harness.states.setStateAsync(objects.later, { val: 3, ack: true });
+                const r = await waitFor(async () => (await sql(`SELECT * FROM numeric_states WHERE state_id = '${objects.later}' AND value = 3`))[0]);
+                assert.equal(r.kind, 'early');
+                assert.equal(r.bogus, undefined);
+                assert.ok(r.location === undefined || r.location === null);
+                assert.equal(r.site, 'home', 'catalog default applies to every state');
+            });
+
             it('enableHistory works without restart and keeps the influxdb.0 settings untouched', async function () {
                 this.timeout(30000);
                 const res = await sendTo(harness, 'enableHistory', {
@@ -231,7 +302,7 @@ tests.integration(path.join(__dirname, '..'), {
                 assert.equal(res.success, true);
                 await waitFor(async () => Object.keys(await sendTo(harness, 'getEnabledDPs', {})).includes(objects.later));
                 await harness.states.setStateAsync(objects.later, { val: 7, ack: true });
-                const r = await waitFor(async () => (await sql(`SELECT value, kind FROM numeric_states WHERE state_id = '${objects.later}'`))[0]);
+                const r = await waitFor(async () => (await sql(`SELECT value, kind FROM numeric_states WHERE state_id = '${objects.later}' AND value = 7`))[0]);
                 assert.deepEqual(r, { value: 7, kind: 'late' });
 
                 await sendTo(harness, 'enableHistory', { id: objects.num, options: { debounceTime: 0 } });
@@ -292,7 +363,7 @@ tests.integration(path.join(__dirname, '..'), {
                 inst1._id = 'system.adapter.influx-v3.1';
                 inst1.common.enabled = true;
                 inst1.native.database = DB2;
-                inst1.native.globalTags = [{ key: 'site', value: 'second' }];
+                inst1.native.tagDefinitions = CATALOG.map(d => (d.key === 'site' ? { ...d, defaultValue: 'second' } : d));
                 await harness.objects.setObjectAsync(inst1._id, inst1);
                 for (const o of ioPackage.instanceObjects) {
                     await harness.objects.setObjectAsync(`influx-v3.1.${o._id}`, { ...o, _id: `influx-v3.1.${o._id}` });

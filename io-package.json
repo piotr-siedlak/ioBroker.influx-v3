@@ -138,6 +138,7 @@
         "metaAck": "field",
         "metaQ": "field",
         "metaFrom": "none",
+        "tagDefinitions": [],
         "globalTags": [],
         "tagKeyStyle": "snake",
         "autoTagRoom": true,

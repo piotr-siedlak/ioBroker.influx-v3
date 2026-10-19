@@ -2,17 +2,13 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WriteQueue = void 0;
 exports.backoffDelay = backoffDelay;
+/**
+ * WriteQueue: batching, retry with exponential backoff and jitter, circuit breaker,
+ * backpressure, optional disk spool and bounded shutdown flush.
+ * See docs/adr/0002-write-path-and-reliability.md.
+ */
+const promises_1 = require("node:timers/promises");
 const lineProtocol_1 = require("./lineProtocol");
-const realTimers = {
-    now: () => Date.now(),
-    setTimeout: (fn, ms) => {
-        const t = setTimeout(fn, ms);
-        t.unref?.();
-        return t;
-    },
-    clearTimeout: h => clearTimeout(h),
-    random: () => Math.random(),
-};
 /**
  * Exponential backoff with jitter: base·2^(n-1), capped, randomised between base and that value.
  *
@@ -29,8 +25,8 @@ class WriteQueue {
     opts;
     target;
     events;
-    spool;
     timers;
+    spool;
     current = [];
     currentBytes = 0;
     pending = [];
@@ -47,13 +43,15 @@ class WriteQueue {
     closed = false;
     persistChain = Promise.resolve();
     drainWaiters = [];
+    /** set when the adapter is stopping: no new timers are started */
+    draining = false;
     lastConnectionOk;
-    constructor(opts, target, events, spool, timers = realTimers) {
+    constructor(opts, target, events, timers, spool) {
         this.opts = opts;
         this.target = target;
         this.events = events;
-        this.spool = spool;
         this.timers = timers;
+        this.spool = spool;
     }
     /** Loads batches left in the spool directory by a previous run. */
     async start() {
@@ -125,8 +123,8 @@ class WriteQueue {
             this.currentBytes >= this.opts.batchMaxBytes) {
             this.seal();
         }
-        else if (this.flushTimer === undefined) {
-            this.flushTimer = this.timers.setTimeout(() => {
+        else if (this.flushTimer === undefined && !this.draining) {
+            this.flushTimer = this.timers.after(() => {
                 this.flushTimer = undefined;
                 this.seal();
             }, this.opts.flushIntervalMs);
@@ -191,7 +189,7 @@ class WriteQueue {
     /** Closes the open batch and hands it over for sending. */
     seal() {
         if (this.flushTimer !== undefined) {
-            this.timers.clearTimeout(this.flushTimer);
+            this.timers.cancel(this.flushTimer);
             this.flushTimer = undefined;
         }
         if (!this.current.length) {
@@ -303,10 +301,10 @@ class WriteQueue {
         }
     }
     scheduleRetry(ms) {
-        if (this.retryTimer !== undefined) {
+        if (this.retryTimer !== undefined || this.closed || this.draining) {
             return;
         }
-        this.retryTimer = this.timers.setTimeout(() => {
+        this.retryTimer = this.timers.after(() => {
             this.retryTimer = undefined;
             this.pump();
         }, Math.max(0, ms));
@@ -470,25 +468,25 @@ class WriteQueue {
         if (this.circuitUntil > this.timers.now() && this.failures > 0) {
             return false;
         }
-        return new Promise(resolve => {
-            const wait = { done: false };
-            const waiter = () => {
-                if (!wait.done) {
-                    wait.done = true;
-                    this.timers.clearTimeout(wait.timer);
-                    resolve(true);
-                }
-            };
-            wait.timer = this.timers.setTimeout(() => {
-                if (!wait.done) {
-                    wait.done = true;
-                    this.drainWaiters = this.drainWaiters.filter(w => w !== waiter);
-                    resolve(false);
-                }
-            }, timeoutMs);
-            this.drainWaiters.push(waiter);
-            this.pump();
+        // A promise delay instead of adapter timers: flush() is also used while the adapter is stopping,
+        // where adapter.setTimeout() refuses new timers. The delay is aborted as soon as the queue drains.
+        const abort = new AbortController();
+        const drained = new Promise(resolve => {
+            this.drainWaiters.push(() => resolve(true));
         });
+        const timedOut = (0, promises_1.setTimeout)(timeoutMs, false, { signal: abort.signal }).catch(() => false);
+        this.pump();
+        const result = await Promise.race([drained, timedOut]);
+        abort.abort();
+        return result;
+    }
+    /** Called first when the adapter stops: accepts records, but starts no timers any more. */
+    beginShutdown() {
+        this.draining = true;
+        if (this.flushTimer !== undefined) {
+            this.timers.cancel(this.flushTimer);
+            this.flushTimer = undefined;
+        }
     }
     /**
      * Stops intake, tries to send for at most `timeoutMs`, then persists the rest
@@ -500,7 +498,7 @@ class WriteQueue {
         this.seal();
         this.closed = true;
         if (this.flushTimer !== undefined) {
-            this.timers.clearTimeout(this.flushTimer);
+            this.timers.cancel(this.flushTimer);
             this.flushTimer = undefined;
         }
         const start = this.timers.now();
@@ -508,7 +506,7 @@ class WriteQueue {
             await this.flush(timeoutMs);
         }
         if (this.retryTimer !== undefined) {
-            this.timers.clearTimeout(this.retryTimer);
+            this.timers.cancel(this.retryTimer);
             this.retryTimer = undefined;
         }
         await this.persistChain;

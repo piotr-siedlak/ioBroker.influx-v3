@@ -9,9 +9,8 @@ its instances or settings.
 
 🇵🇱 **Polska dokumentacja:** [docs/pl/README.md](docs/pl/README.md)
 
-> Status: **0.1.0, not yet published** to npm or the ioBroker repository. Install from GitHub (see below).
-> The GitHub repository still has to be renamed to `ioBroker.influx-v3` before the URLs below work
-> (see [docs/PUBLISHING.md](docs/PUBLISHING.md)).
+> Status: **0.1.0, not yet published** to npm or the ioBroker repository. Test versions:
+> [docs/INSTALL-DEV.md](docs/INSTALL-DEV.md).
 
 ## Features
 
@@ -48,13 +47,13 @@ its instances or settings.
 
 Details, measured limits and sources: [docs/RESEARCH.md](docs/RESEARCH.md).
 
-## Installation (from GitHub, next to the classic adapter)
+## Installation (next to the classic adapter)
 
-1. ioBroker Admin → *Adapters* → expert mode → *Install from custom URL* →
-   `https://github.com/piotr-siedlak/ioBroker.influx-v3` (or on the console:
-   `iobroker url https://github.com/piotr-siedlak/ioBroker.influx-v3`).
+1. ioBroker Admin → *Adapters* → search for **InfluxDB 3** → install. (Until the adapter is listed in the ioBroker
+   repository, test versions are installed as described in [docs/INSTALL-DEV.md](docs/INSTALL-DEV.md).)
 2. Add an instance `influx-v3.0`. An existing `influxdb.0` keeps working unchanged.
-3. Configure the connection (below) and enable logging for states via the gear icon.
+3. Configure the connection (below), define your tag keys in the **tag catalog** (tab *Tags*) and enable logging for
+   states via the gear icon.
 
 ## InfluxDB 3 setup
 
@@ -81,7 +80,7 @@ On **Enterprise**, create a resource token with read+write permission for the on
 | Writing | batched/direct, batch size (records/bytes), flush interval, gzip, `no_sync`, parallel requests, retry delays |
 | Buffer | memory/disk, limits (records, bytes, disk, age), overflow policy, fsync, shutdown timeout |
 | Schema | grouped/per-state, default tables per type, table rules (role/id pattern → table), value column, server limits, text/JSON handling, placement of `ack`/`q`/`from` (field/tag/none) |
-| Tags | global tags, key style (`lower_snake_case` or as entered), automatic tags, native allow-list, protection, dynamic tags |
+| Tags | **tag catalog** (keys, allowed values, defaults), key style (`lower_snake_case` or as entered), automatic tags, native allow-list, protection, dynamic tags |
 | State defaults | defaults for new per-state settings |
 | History & queries | row limits, timeouts, default aggregation, user queries and allowed senders |
 | Advanced | subscription threshold, log rate limits, statistics interval, statistics into InfluxDB (opt-in) |
@@ -92,17 +91,19 @@ On **Enterprise**, create a resource token with read+write permission for the on
 
 *Objects* → gear icon of a state → section **influx-v3.0** → *enabled*. Tabs:
 
-* **Basic:** table (empty = automatic), store as (auto/number/boolean/text), tags of this state, changes only,
-  debounce, re-log interval, minimal delta, **preview** of the resulting line protocol (not saved)
+* **Basic:** table (empty = automatic), store as (auto/number/boolean/text), alias ID, tags of this state (key and
+  value chosen from the tag catalog), changes only, debounce, re-log interval, minimal delta, **preview** of the
+  resulting line protocol (not saved)
 * **Filters:** block time, ack/quality filter, ignore zero/below/above, rounding, initial value, last skipped value
-* **Tags & metadata:** use global/automatic tags, remove tag keys, store ack/q/from, allow sensitive tags
-* **Advanced:** alias ID, value column (per-state mode), debug logs
+* **Tags & metadata:** use catalog defaults ("global tags") / automatic tags, remove tag keys, store ack/q/from,
+  allow sensitive tags
+* **Advanced:** value column (per-state mode), debug logs
 
 Changes take effect immediately (no restart). Disabling stops writing immediately (values waiting in a debounce or
 block window are discarded).
 
 Example — state `heat.0.hc1.temperature` with per-state tags `Location=KOTLOWNIA`, `Device=PC`, `Sub-Type=HC1`,
-table `heating`, room enum "Kotłownia", global tag `site=home`:
+table `heating`, room enum "Kotłownia", catalog default `site=home`:
 
 ```text
 heating,device=PC,location=KOTLOWNIA,room=Kotłownia,site=home,state_id=heat.0.hc1.temperature,sub_type=HC1 value=38.7,ack=true,q=0i 1792418400123
@@ -113,11 +114,27 @@ heating,device=PC,location=KOTLOWNIA,room=Kotłownia,site=home,state_id=heat.0.h
 
 ## Tags
 
-Precedence (lowest → highest): **global → automatic → per-state → removed keys → reserved** (`state_id`, `time`,
+**Tag catalog** (instance settings → *Tags*): the central list of tag keys, so that every object uses the same,
+standardised tags. Each entry has
+
+| Column | Meaning |
+| --- | --- |
+| Tag key | e.g. `Location`, `Device`, `Sub-Type` (stored as `location`, `device`, `sub_type` with the default key style) |
+| Allowed values | comma separated, e.g. `KOTLOWNIA, SALON, GARAZ` |
+| Other values allowed | if set, the object dialog accepts any value for this key, including templates such as `{id.segment[2]}` |
+| Default for all states | written for every state that uses global tags (replaces the former "global tags" table, which is converted automatically) |
+| Description | shown in the key dropdown of the object dialog |
+
+In the object dialog (*Objects → gear icon*) the **key is a dropdown of the catalog** – new keys cannot be created
+there – and the **value** is picked from the key's allowed values (free text only where the key allows it). The
+adapter enforces the same rules at runtime: tags with keys or values outside the catalog (e.g. from scripts via
+`enableHistory` or from the migration) are not written, and a warning is logged.
+
+Precedence (lowest → highest): **catalog defaults → automatic → per-state → removed keys → reserved** (`state_id`, `time`,
 the value column, `ack`, `q`, `from`). Keys are normalised before merging, so `Sub-Type` and `sub_type` are the
 same key; the higher layer wins and a warning is logged.
 
-Templates (no JavaScript, no `eval`): `{id}`, `{id.segment[N]}` (negative N from the end), `{id.adapter}`,
+Templates (only for catalog keys that allow other values; no JavaScript, no `eval`): `{id}`, `{id.segment[N]}` (negative N from the end), `{id.adapter}`,
 `{id.instance}`, `{common.unit}`, `{common.role}`, `{common.type}`, `{common.name}`, `{native.KEY}` (only keys in
 the allow-list), `{enum.room}`, `{enum.function}`, `{parent.device}`, `{parent.channel}`, and – only with *dynamic
 tags* enabled – `{state:<id>}` (value of another state; TTL, allowed characters and a distinct-value limit apply).
@@ -240,6 +257,16 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
+### **WORK IN PROGRESS**
+
+* (Piotr Siedlak) Tag catalog: tag keys and their allowed values are defined centrally in the instance settings; the
+  object dialog only offers these keys/values (the former global tags become catalog defaults automatically)
+* (Piotr Siedlak) Alias ID moved to the basic tab of the object settings
+* (Piotr Siedlak) Installation from GitHub works (compiled `build/` is part of the repository)
+* (Piotr Siedlak) Only adapter-managed timers during operation; shutdown never starts new timers
+* (Piotr Siedlak) Fixed: a value set right after logging was enabled for a state could be lost
+* (Piotr Siedlak) Settings tables are also accepted when they are stored as objects (e.g. written by scripts)
+
 ### 0.1.0 (2026-10-19)
 
 * (Piotr Siedlak) Initial version: per-state logging to InfluxDB 3 Core/Enterprise, grouped and per-state tables,

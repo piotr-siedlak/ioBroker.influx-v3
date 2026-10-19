@@ -14,12 +14,12 @@ class FakeTimers implements Timers {
     now(): number {
         return this.t;
     }
-    setTimeout(fn: () => void, ms: number): unknown {
+    after(fn: () => void, ms: number): unknown {
         const id = ++this.seq;
         this.timers.set(id, { at: this.t + ms, fn });
         return id;
     }
-    clearTimeout(h: unknown): void {
+    cancel(h: unknown): void {
         this.timers.delete(h as number);
     }
     random(): number {
@@ -116,8 +116,8 @@ function make(over: Partial<QueueOptions> = {}, spool?: Spool) {
             connection: ok => ev.conn.push(ok),
             log: (l, m) => ev.logs.push(`${l}: ${m}`),
         },
-        spool,
         timers,
+        spool,
     );
     return { q, timers, target, ev };
 }
@@ -310,6 +310,23 @@ describe('WriteQueue', () => {
         await timers.advance(15_000);
         assert.ok(ev.dropped.some(([n, r]) => n === 3 && r.includes('maximum buffer age')));
         assert.equal(q.stats().queuedRecords, 0);
+    });
+
+    it('beginShutdown(): records are still accepted but no timers are started', async () => {
+        const { q, timers, target } = make({ batchMaxLines: 100, flushIntervalMs: 60_000 });
+        let armed = 0;
+        const after = timers.after.bind(timers);
+        timers.after = (fn: () => void, ms: number) => {
+            armed++;
+            return after(fn, ms);
+        };
+        q.beginShutdown();
+        q.push('a');
+        target.results.push({ kind: 'transient', message: 'down' });
+        const res = await q.shutdown(50);
+        assert.equal(armed, 0, 'neither flush nor retry timers while stopping');
+        assert.deepEqual(target.calls, [['a']]);
+        assert.deepEqual(res, { persisted: 0, lost: 1 });
     });
 
     it('flush() waits until everything is sent', async () => {

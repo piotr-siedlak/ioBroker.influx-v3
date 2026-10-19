@@ -1,11 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.FilterPipeline = exports.realScheduler = void 0;
-exports.realScheduler = {
-    now: () => Date.now(),
-    setTimeout: (fn, ms) => setTimeout(fn, ms),
-    clearTimeout: h => clearTimeout(h),
-};
+exports.FilterPipeline = void 0;
 class FilterPipeline {
     settings;
     emit;
@@ -20,7 +15,7 @@ class FilterPipeline {
     blockPending;
     relogTimer;
     stopped = false;
-    constructor(settings, emit, relogFrom, scheduler = exports.realScheduler) {
+    constructor(settings, emit, relogFrom, scheduler) {
         this.settings = settings;
         this.emit = emit;
         this.relogFrom = relogFrom;
@@ -85,7 +80,7 @@ class FilterPipeline {
             if (this.debouncePending && this.debouncePending.val === s.val) {
                 return 'debounce:waiting';
             }
-            this.scheduler.clearTimeout(this.debounceTimer);
+            this.scheduler.cancel(this.debounceTimer);
             this.debounceTimer = undefined;
             this.debouncePending = undefined;
             restarted = true;
@@ -132,7 +127,7 @@ class FilterPipeline {
         this.skipped = undefined;
         if (cfg.debounceTime > 0) {
             this.debouncePending = s;
-            this.debounceTimer = this.scheduler.setTimeout(() => {
+            this.debounceTimer = this.scheduler.after(() => {
                 this.debounceTimer = undefined;
                 const pending = this.debouncePending;
                 this.debouncePending = undefined;
@@ -163,7 +158,7 @@ class FilterPipeline {
             return; // the running timer will release the newest pending value
         }
         const delay = Math.max(0, until - this.scheduler.now());
-        this.blockTimer = this.scheduler.setTimeout(() => {
+        this.blockTimer = this.scheduler.after(() => {
             this.blockTimer = undefined;
             const pending = this.blockPending;
             this.blockPending = undefined;
@@ -174,7 +169,7 @@ class FilterPipeline {
     }
     clearBlocked() {
         if (this.blockTimer !== undefined) {
-            this.scheduler.clearTimeout(this.blockTimer);
+            this.scheduler.cancel(this.blockTimer);
             this.blockTimer = undefined;
         }
         this.blockPending = undefined;
@@ -185,7 +180,7 @@ class FilterPipeline {
         if (!cfg.changesOnly || cfg.changesRelogInterval <= 0 || this.stopped) {
             return;
         }
-        this.relogTimer = this.scheduler.setTimeout(() => {
+        this.relogTimer = this.scheduler.after(() => {
             this.relogTimer = undefined;
             if (!this.lastLogged || this.stopped) {
                 return;
@@ -200,7 +195,7 @@ class FilterPipeline {
     }
     clearRelog() {
         if (this.relogTimer !== undefined) {
-            this.scheduler.clearTimeout(this.relogTimer);
+            this.scheduler.cancel(this.relogTimer);
             this.relogTimer = undefined;
         }
     }
@@ -210,7 +205,7 @@ class FilterPipeline {
      */
     flushPending() {
         if (this.debounceTimer !== undefined) {
-            this.scheduler.clearTimeout(this.debounceTimer);
+            this.scheduler.cancel(this.debounceTimer);
             this.debounceTimer = undefined;
             const pending = this.debouncePending;
             this.debouncePending = undefined;
@@ -219,7 +214,7 @@ class FilterPipeline {
             }
         }
         if (this.blockTimer !== undefined) {
-            this.scheduler.clearTimeout(this.blockTimer);
+            this.scheduler.cancel(this.blockTimer);
             this.blockTimer = undefined;
             const pending = this.blockPending;
             this.blockPending = undefined;
@@ -238,13 +233,22 @@ class FilterPipeline {
         this.settings = settings;
         this.armRelog();
     }
+    /**
+     * For the adapter shutdown: stops all timers and writes values that wait in a debounce or block
+     * window, without starting new timers.
+     */
+    shutdown() {
+        this.stopped = true;
+        this.clearRelog();
+        this.flushPending();
+    }
     /** Stops all timers; nothing is emitted afterwards. */
     stop() {
         this.stopped = true;
         this.clearRelog();
         this.clearBlocked();
         if (this.debounceTimer !== undefined) {
-            this.scheduler.clearTimeout(this.debounceTimer);
+            this.scheduler.cancel(this.debounceTimer);
             this.debounceTimer = undefined;
         }
         this.debouncePending = undefined;

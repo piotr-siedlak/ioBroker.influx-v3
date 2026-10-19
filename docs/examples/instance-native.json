@@ -8,11 +8,62 @@
     "bufferMode": "disk",
     "schemaMode": "grouped",
     "tableRules": [
-        { "match": "role", "pattern": "value.temperature*", "valueType": "", "table": "temperature" },
-        { "match": "role", "pattern": "value.power*", "valueType": "", "table": "energy" },
-        { "match": "id", "pattern": "heat.0.*", "valueType": "", "table": "heating" }
+        {
+            "match": "role",
+            "pattern": "value.temperature*",
+            "valueType": "",
+            "table": "temperature"
+        },
+        {
+            "match": "role",
+            "pattern": "value.power*",
+            "valueType": "",
+            "table": "energy"
+        },
+        {
+            "match": "id",
+            "pattern": "heat.0.*",
+            "valueType": "",
+            "table": "heating"
+        }
     ],
-    "globalTags": [{ "key": "site", "value": "home" }],
+    "tagDefinitions": [
+        {
+            "key": "Location",
+            "values": "KOTLOWNIA, SALON, GARAZ",
+            "allowOther": false,
+            "defaultValue": "",
+            "description": "room of the device"
+        },
+        {
+            "key": "Device",
+            "values": "PC, BOILER, SENSOR",
+            "allowOther": false,
+            "defaultValue": "",
+            "description": ""
+        },
+        {
+            "key": "Sub-Type",
+            "values": "HC1, HC2, HC3, DHW",
+            "allowOther": false,
+            "defaultValue": "",
+            "description": "heating circuit"
+        },
+        {
+            "key": "circuit",
+            "values": "",
+            "allowOther": true,
+            "defaultValue": "",
+            "description": "templates allowed, e.g. {id.segment[2]}"
+        },
+        {
+            "key": "site",
+            "values": "home",
+            "allowOther": false,
+            "defaultValue": "home",
+            "description": "written for every state"
+        }
+    ],
     "tagKeyStyle": "snake",
     "autoTagRoom": true,
     "autoTagFunction": true,

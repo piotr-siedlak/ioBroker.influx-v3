@@ -9,7 +9,8 @@ awarie oraz odczytem historii i zapytaniami SQL. Jest to **niezależny** adapter
 
 🇬🇧 English: [README.md](../../README.md)
 
-> Status: **0.1.0, jeszcze nieopublikowany** w npm ani w repozytorium ioBrokera. Instalacja z GitHuba (niżej).
+> Status: **0.1.0, jeszcze nieopublikowany** w npm ani w repozytorium ioBrokera. Wersje testowe:
+> [docs/INSTALL-DEV.md](../INSTALL-DEV.md) (instalacja z GitHuba).
 > Repozytorium na GitHubie trzeba najpierw przemianować na `ioBroker.influx-v3`, dopiero wtedy poniższe adresy
 > zadziałają (zob. [docs/PUBLISHING.md](../PUBLISHING.md)).
 
@@ -17,7 +18,8 @@ awarie oraz odczytem historii i zapytaniami SQL. Jest to **niezależny** adapter
 
 * Włączanie i ustawienia per stan w *Obiekty → zębatka → influx-v3.N* (bez restartu adaptera)
 * Dwa modele tabel: **grupowy** (wspólne tabele, tag `state_id`, zalecany) i **per-stan** (tabela na stan)
-* Tagi: globalne, automatyczne (room, function, adapter, instance, device, channel, unit, role, name), per stan,
+* Tagi: **katalog tagów** (klucze, dozwolone wartości, wartości domyślne), automatyczne (room, function, adapter,
+  instance, device, channel, unit, role, name), per stan wybierane z katalogu,
   bezpieczne szablony (`{id.segment[2]}`, `{common.unit}`, `{enum.room}` …), opcjonalne tagi dynamiczne z innych
   stanów; ochrona przed sekretami w tagach i przed eksplozją kardynalności
 * Filtry per stan: tylko zmiany, debounce, czas blokady, minimalna zmiana, ponowny zapis, filtr ack/jakości,
@@ -54,7 +56,8 @@ Szczegóły, zmierzone limity i źródła: [docs/RESEARCH.md](../RESEARCH.md).
    `https://github.com/piotr-siedlak/ioBroker.influx-v3` (albo w konsoli:
    `iobroker url https://github.com/piotr-siedlak/ioBroker.influx-v3`).
 2. Dodaj instancję `influx-v3.0`. Istniejące `influxdb.0` działa dalej bez zmian.
-3. Skonfiguruj połączenie (niżej) i włącz zapis wybranych stanów ikoną zębatki.
+3. Skonfiguruj połączenie (niżej), zdefiniuj klucze tagów w **katalogu tagów** (zakładka *Tagi*) i włącz zapis
+   wybranych stanów ikoną zębatki.
 
 ## Przygotowanie InfluxDB 3
 
@@ -91,7 +94,7 @@ i pokazuje edycję, wersję, istnienie bazy i retencję — nigdy token.
 | Zapis danych | paczkowy/bezpośredni, wielkość paczki (rekordy/bajty), interwał wysyłania, gzip, `no_sync`, równoległe żądania, opóźnienia ponowień |
 | Bufor awaryjny | pamięć/dysk, limity (rekordy, bajty, dysk, wiek), polityka przepełnienia, fsync, czas na wysłanie przy zatrzymaniu |
 | Schemat pomiarów | grupowy/per-stan, domyślne tabele per typ, reguły tabel (wzorzec roli/ID → tabela), kolumna wartości, limity serwera, teksty/JSON, umiejscowienie `ack`/`q`/`from` (pole/tag/brak) |
-| Tagi | tagi globalne, styl kluczy (`lower_snake_case` lub bez zmian), tagi automatyczne, lista dozwolonych kluczy native, ochrona, tagi dynamiczne |
+| Tagi | **katalog tagów** (klucze, dozwolone wartości, domyślne), styl kluczy (`lower_snake_case` lub bez zmian), tagi automatyczne, lista dozwolonych kluczy native, ochrona, tagi dynamiczne |
 | Domyślne ustawienia stanów | wartości domyślne dla nowych konfiguracji stanów |
 | Odczyty i historia | limity wierszy, limity czasu, domyślna agregacja, zapytania użytkownika i dozwoleni nadawcy |
 | Zaawansowane | próg subskrypcji wszystkich stanów, limity logów, interwał statystyk, statystyki do InfluxDB (opcjonalnie) |
@@ -102,12 +105,13 @@ i pokazuje edycję, wersję, istnienie bazy i retencję — nigdy token.
 
 *Obiekty* → zębatka przy stanie → sekcja **influx-v3.0** → *włączone*. Zakładki:
 
-* **Podstawowe:** tabela (puste = automatycznie), zapisz jako (auto/liczba/logiczna/tekst), tagi tego stanu,
-  tylko zmiany, debounce, ponowny zapis, minimalna zmiana, **podgląd** wynikowego rekordu Line Protocol (bez zapisu)
+* **Podstawowe:** tabela (puste = automatycznie), zapisz jako (auto/liczba/logiczna/tekst), alias ID, tagi tego
+  stanu (klucz i wartość wybierane z katalogu tagów), tylko zmiany, debounce, ponowny zapis, minimalna zmiana, **podgląd** wynikowego rekordu Line Protocol (bez zapisu)
 * **Filtry:** czas blokady, filtr ack/jakości, ignorowanie zera / poniżej / powyżej, zaokrąglanie, wartość
   początkowa, ostatnia pominięta wartość
-* **Tagi i metadane:** tagi globalne/automatyczne, usuwanie kluczy tagów, zapis ack/q/from, zgoda na „wrażliwe” tagi
-* **Zaawansowane:** alias ID, kolumna wartości (tryb per-stan), logi debug
+* **Tagi i metadane:** wartości domyślne z katalogu („tagi globalne”) / tagi automatyczne, usuwanie kluczy tagów,
+  zapis ack/q/from, zgoda na „wrażliwe” tagi
+* **Zaawansowane:** kolumna wartości (tryb per-stan), logi debug
 
 Zmiany działają natychmiast (bez restartu). Wyłączenie natychmiast zatrzymuje zapis (wartości czekające w oknie
 debounce lub blokady są odrzucane).
@@ -126,7 +130,18 @@ w stylu `lower_snake_case` (`Sub-Type` → `sub_type`).
 
 ## Tagi
 
-Kolejność (od najsłabszej): **globalne → automatyczne → stanu → usunięte klucze → zastrzeżone** (`state_id`,
+**Katalog tagów** (ustawienia instancji → *Tagi*) to centralna lista kluczy tagów, dzięki której wszystkie obiekty
+używają tych samych, ustandaryzowanych tagów. Każdy wpis ma: *klucz* (np. `Location`, `Device`, `Sub-Type`),
+*dozwolone wartości* (po przecinku, np. `KOTLOWNIA, SALON, GARAZ`), przełącznik *inne wartości dozwolone* (wtedy
+również szablony, np. `{id.segment[2]}`), *wartość domyślną dla wszystkich stanów* (zastępuje dawną tabelę „tagów
+globalnych”, która jest konwertowana automatycznie) i *opis*.
+
+W oknie obiektu (*Obiekty → zębatka*) **klucz wybiera się z listy katalogu** – nie można tam tworzyć nowych kluczy – a
+**wartość** z dozwolonych wartości tego klucza (dowolny tekst tylko tam, gdzie klucz na to pozwala). Adapter stosuje
+te same reguły podczas pracy: tagi z kluczami lub wartościami spoza katalogu (np. ze skryptów przez `enableHistory`
+albo z migracji) nie są zapisywane, a w logu pojawia się ostrzeżenie.
+
+Kolejność (od najsłabszej): **domyślne z katalogu → automatyczne → stanu → usunięte klucze → zastrzeżone** (`state_id`,
 `time`, kolumna wartości, `ack`, `q`, `from`). Klucze są normalizowane przed scaleniem, więc `Sub-Type`
 i `sub_type` to ten sam klucz; wygrywa wyższa warstwa, a w logu pojawia się ostrzeżenie.
 

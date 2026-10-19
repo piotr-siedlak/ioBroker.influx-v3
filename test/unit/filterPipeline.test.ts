@@ -15,12 +15,12 @@ class FakeClock implements Scheduler {
     now(): number {
         return this.t;
     }
-    setTimeout(fn: () => void, ms: number): unknown {
+    after(fn: () => void, ms: number): unknown {
         const id = ++this.seq;
         this.timers.set(id, { at: this.t + ms, fn });
         return id;
     }
-    clearTimeout(h: unknown): void {
+    cancel(h: unknown): void {
         this.timers.delete(h as number);
     }
     advance(ms: number): void {
@@ -265,6 +265,19 @@ describe('FilterPipeline', () => {
         clock.advance(10_000);
         assert.equal(out.length, 0);
         assert.equal(clock.pending, 0);
+        assert.equal(p.process(s(2)), 'filtered:ignore');
+    });
+
+    it('shutdown() writes values waiting for debounce/block time and leaves no timers', () => {
+        const { p, s, out, clock } = setup({ debounceTime: 1000, changesOnly: true, changesRelogInterval: 60 });
+        p.process(s(1));
+        assert.equal(out.length, 0);
+        p.shutdown();
+        assert.deepEqual(
+            out.map(o => [o.val, o.reason]),
+            [[1, 'debounced']],
+        );
+        assert.equal(clock.pending, 0, 'no relog timer is started after shutdown');
         assert.equal(p.process(s(2)), 'filtered:ignore');
     });
 

@@ -7,11 +7,15 @@
  * produce a warning instead of crashing the adapter.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.FIELD_NAME_RE = exports.RETENTION_RE = exports.DATABASE_NAME_RE = exports.DEFAULT_INSTANCE_CONFIG = exports.MAX_RELOG_SECONDS = exports.SERVER_MAX_STRING_BYTES = exports.SERVER_MAX_REQUEST_BYTES = void 0;
+exports.FIELD_NAME_RE = exports.RESERVED_TAG_KEYS = exports.RETENTION_RE = exports.DATABASE_NAME_RE = exports.DEFAULT_INSTANCE_CONFIG = exports.MAX_RELOG_SECONDS = exports.SERVER_MAX_STRING_BYTES = exports.SERVER_MAX_REQUEST_BYTES = void 0;
 exports.validateTableName = validateTableName;
+exports.tableRows = tableRows;
+exports.splitTagValues = splitTagValues;
+exports.parseTagDefinitions = parseTagDefinitions;
 exports.normalizeInstanceConfig = normalizeInstanceConfig;
 exports.normalizeStateConfig = normalizeStateConfig;
 exports.stateConfigKey = stateConfigKey;
+const tagResolver_1 = require("./tagResolver");
 /** Hard limits of the server measured on Core 3.12.1, used as upper bounds */
 exports.SERVER_MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 exports.SERVER_MAX_STRING_BYTES = 1024 * 1024;
@@ -58,6 +62,7 @@ exports.DEFAULT_INSTANCE_CONFIG = Object.freeze({
     metaAck: 'field',
     metaQ: 'field',
     metaFrom: 'none',
+    tagDefinitions: [],
     globalTags: [],
     tagKeyStyle: 'snake',
     autoTagRoom: true,
@@ -216,7 +221,8 @@ class Reader {
             });
         }
         else if (!Array.isArray(v) && typeof v === 'object') {
-            list = Object.entries(v).map(([k, val]) => ({ key: k, value: val }));
+            const rows = tableRows(v);
+            list = rows.length ? rows : Object.entries(v).map(([k, val]) => ({ key: k, value: val }));
         }
         if (!Array.isArray(list)) {
             this.warnings.push(`${this.prefix}${key}: invalid tag list, ignored`);
@@ -294,6 +300,89 @@ function validateTableName(name) {
     }
     return null;
 }
+/** Tag keys that are columns of every table or reserved for metadata */
+exports.RESERVED_TAG_KEYS = ['time', 'state_id', 'value', 'ack', 'q', 'from'];
+/**
+ * Returns the rows of an Admin table setting. Besides arrays, objects with index keys
+ * (`{"0": {...}, "1": {...}}`) are accepted: merging a table into an instance object that does not
+ * have the attribute yet produces this shape.
+ *
+ * @param raw table value from `native`
+ */
+function tableRows(raw) {
+    if (Array.isArray(raw)) {
+        return raw;
+    }
+    if (raw && typeof raw === 'object') {
+        const entries = Object.entries(raw);
+        if (entries.length && entries.every(([k]) => /^\d+$/.test(k))) {
+            return entries.sort((a, b) => Number(a[0]) - Number(b[0])).map(([, v]) => v);
+        }
+    }
+    return [];
+}
+/**
+ * Splits a comma separated list of allowed tag values (Admin table cell) into unique trimmed values.
+ *
+ * @param raw string or array
+ */
+function splitTagValues(raw) {
+    const list = Array.isArray(raw) ? raw : typeof raw === 'string' ? raw.split(',') : [];
+    const out = [];
+    for (const v of list) {
+        const s = typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '';
+        if (s && !out.includes(s)) {
+            out.push(s);
+        }
+    }
+    return out;
+}
+/**
+ * Parses the tag catalog table of the instance settings.
+ *
+ * @param raw rows `{key, values, allowOther, defaultValue, description}`
+ * @param style tag key style (keys are unique after normalisation)
+ * @param valueField name of the value column (reserved as tag key)
+ * @param warnings collector
+ */
+function parseTagDefinitions(raw, style, valueField, warnings) {
+    const out = [];
+    const seen = new Set();
+    const reserved = new Set([...exports.RESERVED_TAG_KEYS, valueField.toLowerCase()]);
+    tableRows(raw).forEach((row, i) => {
+        if (!row || typeof row !== 'object') {
+            return;
+        }
+        const rec = row;
+        const key = typeof rec.key === 'string' ? rec.key.trim() : '';
+        if (!key) {
+            return;
+        }
+        const norm = (0, tagResolver_1.normalizeTagKey)(key, style);
+        if (!norm || reserved.has(norm.toLowerCase()) || norm.startsWith('_')) {
+            warnings.push(`tagDefinitions[${i}]: key "${key}" is empty or reserved - ignored`);
+            return;
+        }
+        if (seen.has(norm)) {
+            warnings.push(`tagDefinitions[${i}]: key "${key}" is defined twice (as "${norm}") - second definition ignored`);
+            return;
+        }
+        seen.add(norm);
+        const values = splitTagValues(rec.values);
+        const allowOther = rec.allowOther === true || rec.allowOther === 'true';
+        let defaultValue = typeof rec.defaultValue === 'string' ? rec.defaultValue.trim() : '';
+        if (defaultValue && !allowOther && !values.includes(defaultValue)) {
+            warnings.push(`tagDefinitions[${i}]: default value "${defaultValue}" of "${key}" is not an allowed value - ignored`);
+            defaultValue = '';
+        }
+        if (!values.length && !allowOther) {
+            warnings.push(`tagDefinitions[${i}]: "${key}" has no allowed values and does not allow other values - it cannot be used`);
+        }
+        const description = typeof rec.description === 'string' ? rec.description.trim() : '';
+        out.push({ key, values, allowOther, defaultValue, description });
+    });
+    return out;
+}
 /** Field (column) names usable for the value field */
 exports.FIELD_NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 function normalizeUrl(url, warnings) {
@@ -319,11 +408,8 @@ function normalizeUrl(url, warnings) {
     return u.toString().replace(/\/+$/, '');
 }
 function parseRules(raw, warnings) {
-    if (!Array.isArray(raw)) {
-        return [];
-    }
     const rules = [];
-    raw.forEach((r, i) => {
+    tableRows(raw).forEach((r, i) => {
         if (!r || typeof r !== 'object') {
             return;
         }
@@ -403,7 +489,8 @@ function normalizeInstanceConfig(raw) {
         metaAck: r.oneOf('metaAck', d.metaAck, ['field', 'tag', 'none']),
         metaQ: r.oneOf('metaQ', d.metaQ, ['field', 'tag', 'none']),
         metaFrom: r.oneOf('metaFrom', d.metaFrom, ['field', 'tag', 'none']),
-        globalTags: r.tags('globalTags'),
+        tagDefinitions: [],
+        globalTags: [],
         tagKeyStyle: r.oneOf('tagKeyStyle', d.tagKeyStyle, ['snake', 'preserve']),
         autoTagRoom: r.bool('autoTagRoom', d.autoTagRoom),
         autoTagFunction: r.bool('autoTagFunction', d.autoTagFunction),
@@ -481,6 +568,22 @@ function normalizeInstanceConfig(raw) {
     if (config.edition === 'cloud') {
         warnings.push('edition "cloud" is experimental and write-only (history and SQL are not available)');
     }
+    config.tagDefinitions = parseTagDefinitions(raw?.tagDefinitions, config.tagKeyStyle, config.valueField, warnings);
+    const legacyGlobalTags = r.tags('globalTags');
+    if (!config.tagDefinitions.length && legacyGlobalTags.length) {
+        // configurations from before the tag catalog: every global tag becomes a catalog key with a default
+        config.tagDefinitions = parseTagDefinitions(legacyGlobalTags.map(t => ({
+            key: t.key,
+            values: '',
+            allowOther: true,
+            defaultValue: t.value,
+            description: '',
+        })), config.tagKeyStyle, config.valueField, warnings);
+        warnings.push('globalTags: converted into the tag catalog (keys with default values) - open and save the instance settings to keep them');
+    }
+    config.globalTags = config.tagDefinitions
+        .filter(t => t.defaultValue)
+        .map(t => ({ key: t.key, value: t.defaultValue }));
     if (!config.token) {
         warnings.push('token: no API token configured - InfluxDB 3 requires authentication unless started with --without-auth');
     }

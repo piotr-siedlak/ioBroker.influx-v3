@@ -9,6 +9,14 @@ import { InfluxV3Client } from '../../../src/lib/influxClient';
 import { Spool } from '../../../src/lib/spool';
 import { WriteQueue } from '../../../src/lib/writeQueue';
 
+/** Node timers for code outside the adapter (tests, scripts) */
+const nodeTimers = {
+    now: (): number => Date.now(),
+    after: (fn: () => void, ms: number): unknown => setTimeout(fn, ms),
+    cancel: (h: unknown): void => clearTimeout(h as NodeJS.Timeout),
+    random: (): number => Math.random(),
+};
+
 const [dir, countArg] = process.argv.slice(2);
 const count = Number(countArg);
 
@@ -49,6 +57,7 @@ const queue = new WriteQueue(
         connection: () => undefined,
         log: () => undefined,
     },
+    nodeTimers,
     new Spool(dir, true),
 );
 

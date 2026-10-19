@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { DEFAULT_INSTANCE_CONFIG, type InstanceConfig, type StateConfig } from '../../src/lib/config';
 import {
     CardinalityGuard,
+    checkTagAgainstCatalog,
     evaluateTemplate,
     looksSensitive,
     normalizeTagKey,
@@ -30,9 +31,17 @@ const ctx = (over: Partial<TagContext> = {}): TagContext => ({
     ...over,
 });
 
+/** Builds settings; unless a test passes its own catalog, every per-state key is allowed with any value. */
 function settings(inst: Partial<InstanceConfig> = {}, st: Partial<StateConfig> = {}): TagSettings {
+    const permissive = (st.customTags ?? []).map(t => ({
+        key: t.key,
+        values: [],
+        allowOther: true,
+        defaultValue: '',
+        description: '',
+    }));
     return {
-        instance: { ...DEFAULT_INSTANCE_CONFIG, ...inst },
+        instance: { ...DEFAULT_INSTANCE_CONFIG, tagDefinitions: permissive, ...inst },
         state: {
             customTags: [],
             excludeTags: [],
@@ -224,6 +233,61 @@ describe('tagResolver', () => {
             assert.equal(sanitizeTagValue('  a\nb\\ ', 10), 'a b');
             assert.equal(sanitizeTagValue('abcdefghij\\k', 10), 'abcdefghij'.replace(/\\+$/, ''));
             assert.equal(sanitizeTagValue('abcdefghi\\jk', 10), 'abcdefghi');
+        });
+    });
+
+    describe('tag catalog', () => {
+        const catalog = [
+            {
+                key: 'Location',
+                values: ['KOTLOWNIA', 'SALON'],
+                allowOther: false,
+                defaultValue: '',
+                description: 'room',
+            },
+            { key: 'Sub-Type', values: ['HC1', 'HC2', 'HC3'], allowOther: false, defaultValue: '', description: '' },
+            { key: 'device', values: ['PC'], allowOther: true, defaultValue: '', description: '' },
+        ];
+        const resolve = (customTags: { key: string; value: string }[]) =>
+            resolveTags(ctx({ rooms: [], functions: [] }), settings({ tagDefinitions: catalog }, { customTags }));
+
+        it('accepts catalog keys with allowed values (keys compared after normalisation)', () => {
+            const r = resolve([
+                { key: 'Location', value: 'KOTLOWNIA' },
+                { key: 'sub_type', value: 'HC2' },
+            ]);
+            assert.deepEqual(r.tags, { location: 'KOTLOWNIA', sub_type: 'HC2' });
+            assert.deepEqual(r.warnings, []);
+        });
+        it('ignores keys that are not in the catalog', () => {
+            const r = resolve([{ key: 'floor', value: '1' }]);
+            assert.deepEqual(r.tags, {});
+            assert.ok(r.warnings[0].includes('not defined in the tag catalog'));
+        });
+        it('ignores values that are not allowed for the key', () => {
+            const r = resolve([{ key: 'Location', value: 'GARAZ' }]);
+            assert.deepEqual(r.tags, {});
+            assert.ok(r.warnings[0].includes('not allowed for "Location"'));
+            assert.ok(r.warnings[0].includes('KOTLOWNIA, SALON'));
+        });
+        it('allows other values and templates only for keys that allow them', () => {
+            const ok = resolve([{ key: 'device', value: '{id.segment[2]}' }]);
+            assert.deepEqual(ok.tags, { device: 'hc1' });
+            const bad = resolve([{ key: 'Sub-Type', value: '{id.segment[2]}' }]);
+            assert.deepEqual(bad.tags, {});
+        });
+        it('an empty catalog allows no per-state tags', () => {
+            const r = resolveTags(
+                ctx(),
+                settings({ tagDefinitions: [] }, { customTags: [{ key: 'location', value: 'X' }] }),
+            );
+            assert.equal(r.tags.location, undefined);
+        });
+        it('checkTagAgainstCatalog reports the reason', () => {
+            const r = checkTagAgainstCatalog({ key: 'Location', value: ' SALON ' }, catalog, 'snake');
+            assert.ok(r.ok && r.definition.key === 'Location');
+            const r2 = checkTagAgainstCatalog({ key: 'location', value: 'SALON' }, catalog, 'preserve');
+            assert.equal(r2.ok, false, 'in preserve mode "location" and "Location" are different keys');
         });
     });
 

@@ -5,7 +5,7 @@
  * Precedence (lowest → highest): global → automatic → per-state → explicit removal → reserved.
  * See docs/adr/0004-tags-and-cardinality.md.
  */
-import type { InstanceConfig, StateConfig, TagKeyStyle } from './config';
+import type { InstanceConfig, StateConfig, TagDefinition, TagKeyStyle, TagPair } from './config';
 import { sanitizeIdentifier } from './lineProtocol';
 
 export interface TagContext {
@@ -50,6 +50,7 @@ export interface TagSettings {
     instance: Pick<
         InstanceConfig,
         | 'globalTags'
+        | 'tagDefinitions'
         | 'tagKeyStyle'
         | 'autoTagRoom'
         | 'autoTagFunction'
@@ -68,6 +69,37 @@ export interface TagSettings {
     state: Pick<StateConfig, 'customTags' | 'excludeTags' | 'useGlobalTags' | 'useAutoTags' | 'allowSensitiveTags'>;
     /** keys that may not be used as tags (lower case) */
     reserved: Set<string>;
+}
+
+/**
+ * Checks one per-state tag against the instance tag catalog.
+ * Returns the catalog entry, or an error text when the key or the value is not allowed.
+ *
+ * @param tag per-state tag (key as entered, raw value incl. templates)
+ * @param catalog tag catalog of the instance
+ * @param style tag key style (keys are compared after normalisation)
+ */
+export function checkTagAgainstCatalog(
+    tag: TagPair,
+    catalog: readonly TagDefinition[],
+    style: TagKeyStyle,
+): { ok: true; definition: TagDefinition } | { ok: false; reason: string } {
+    const key = normalizeTagKey(tag.key, style);
+    const definition = catalog.find(d => normalizeTagKey(d.key, style) === key);
+    if (!definition) {
+        return {
+            ok: false,
+            reason: `key "${tag.key}" is not defined in the tag catalog of the instance (instance settings → Tags)`,
+        };
+    }
+    const value = tag.value.trim();
+    if (!definition.allowOther && !definition.values.includes(value)) {
+        return {
+            ok: false,
+            reason: `value "${value}" is not allowed for "${definition.key}" (allowed: ${definition.values.join(', ') || '-'})`,
+        };
+    }
+    return { ok: true, definition };
 }
 
 /**
@@ -325,8 +357,13 @@ export function resolveTags(ctx: TagContext, settings: TagSettings): ResolvedTag
         }
     }
 
-    // per-state tags
+    // per-state tags: only keys (and values) of the instance tag catalog
     for (const t of st.customTags) {
+        const check = checkTagAgainstCatalog(t, inst.tagDefinitions, inst.tagKeyStyle);
+        if (!check.ok) {
+            warnings.push(`tag "${t.key}": ${check.reason} - ignored`);
+            continue;
+        }
         const ev = evaluateTemplate(t.value, ctx, inst.nativeAllowlist, warnings);
         if (ev.dynamicSources.length) {
             if (!inst.dynamicTagsEnabled) {
