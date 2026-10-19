@@ -30,6 +30,23 @@ jobs:
                   type-checking: true
                   lint: true
 
+    # build/ is committed (needed for installs from GitHub) - it must match the sources
+    build-is-committed:
+        if: contains(github.event.head_commit.message, '[skip ci]') == false
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v7
+            - uses: actions/setup-node@v7
+              with:
+                  node-version: 22.x
+            - run: npm ci
+            - run: npm run build
+            - name: Fail if build/ differs from the committed version
+              run: |
+                  git status --porcelain -- build
+                  git diff --exit-code -- build
+                  test -z "$(git status --porcelain -- build)"
+
     # Unit tests + adapter integration tests (real js-controller) on all supported Node.js versions and OSes
     adapter-tests:
         if: contains(github.event.head_commit.message, '[skip ci]') == false

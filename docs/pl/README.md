@@ -247,7 +247,7 @@ filtry, debounce/czas blokady, zaokrąglanie, alias, typ zapisu, własne tagi. N
 
 ```bash
 npm ci
-npm run build
+npm run build                                      # build/ jest w repozytorium – commituj razem ze zmianami w src/
 npm run lint && npm run check
 npm run test:unit                                  # testy jednostkowe, bez sieci
 eval "$(scripts/influx3-test-server.sh start)"     # izolowany InfluxDB 3 Core w Dockerze

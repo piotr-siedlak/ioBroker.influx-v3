@@ -1,5 +1,6 @@
+# build/ is committed on purpose: installing from GitHub (iobroker url ...) uses the repository as-is,
+# and npm lifecycle scripts like "prepare" are not allowed for ioBroker adapters.
 node_modules/
-build/
 .dev-server/
 .idea/
 .vscode/

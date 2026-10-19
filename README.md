@@ -221,7 +221,7 @@ time, rounding, alias, storage type, custom tags. Never changed: the settings of
 
 ```bash
 npm ci
-npm run build            # TypeScript → build/
+npm run build            # TypeScript → build/ (committed: commit it together with src/ changes)
 npm run lint && npm run check
 npm run test:unit        # unit tests, no network
 eval "$(scripts/influx3-test-server.sh start)"   # isolated InfluxDB 3 Core in Docker

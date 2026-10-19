@@ -19,6 +19,9 @@ eval "$(scripts/influx3-test-server.sh start)" && npm run test:influx && npm run
 
 6. UI texts: add every new key to all 11 files in `admin/i18n/` (`npm run translate` can fill missing languages,
    it needs a translation API key). Every Admin control needs the sizes `xs, sm, md, lg, xl` (checker `E5507`).
-7. Add an entry under `### **WORK IN PROGRESS**` in the changelog of README.md.
+7. `build/` is committed (installation from GitHub needs it, and `prepare` scripts are not allowed for ioBroker
+   adapters): run `npm run build` and commit the changed `build/` files together with the sources. CI fails if they
+   differ.
+8. Add an entry under `### **WORK IN PROGRESS**` in the changelog of README.md.
 
 Commits follow the conventional style (`feat:`, `fix:`, `docs:`, `test:` …).
