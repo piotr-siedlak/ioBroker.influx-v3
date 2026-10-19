@@ -71,7 +71,7 @@ function setup(over: Partial<FilterSettings> = {}): {
     const p = new FilterPipeline(
         { ...base, ...over },
         (st, reason) => out.push({ val: st.val, ts: st.ts, reason, from: st.from }),
-        'system.adapter.influx_v3.0',
+        'system.adapter.influx-v3.0',
         clock,
     );
     const s = (val: number | boolean | string, extra: Partial<PreparedState> = {}): PreparedState => ({
@@ -170,7 +170,7 @@ describe('FilterPipeline', () => {
             ],
         );
         assert.equal(out[1].ts, clock.now());
-        assert.equal(out[1].from, 'system.adapter.influx_v3.0');
+        assert.equal(out[1].from, 'system.adapter.influx-v3.0');
         clock.advance(30_000);
         p.process(s(8)); // change resets the relog timer
         clock.advance(59_000);

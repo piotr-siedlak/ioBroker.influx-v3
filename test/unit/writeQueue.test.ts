@@ -323,7 +323,7 @@ describe('WriteQueue', () => {
     describe('with disk spool', () => {
         let dir: string;
         beforeEach(() => {
-            dir = fs.mkdtempSync(path.join(os.tmpdir(), 'influx_v3-spool-'));
+            dir = fs.mkdtempSync(path.join(os.tmpdir(), 'influx-v3-spool-'));
         });
         afterEach(() => {
             fs.rmSync(dir, { recursive: true, force: true });

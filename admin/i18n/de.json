@@ -220,7 +220,7 @@
     "tip_Max. age of buffered data (h)": "Ältere Pakete werden verworfen und als verworfen gezählt.",
     "tip_Max. batch size (bytes)": "Obergrenze eines Anfrage-Bodys (Serverlimit 10 MiB, hier maximal 8 MiB).",
     "tip_Max. columns per table": "Spaltenlimit des Servers (Core Standard 500, inkl. time und Tags).",
-    "tip_Max. disk buffer (bytes)": "Grenze des Plattenpuffers in iobroker-data/influx_v3.N/spool.",
+    "tip_Max. disk buffer (bytes)": "Grenze des Plattenpuffers in iobroker-data/influx-v3.N/spool.",
     "tip_Max. distinct values per dynamic tag": "Weitere Werte werden als _other geschrieben.",
     "tip_Max. distinct values per tag key": "Kardinalitätsschutz für variable Tags; weitere Werte werden als _other geschrieben.",
     "tip_Max. memory buffer (bytes)": "Grenze der gepufferten Daten im RAM.",

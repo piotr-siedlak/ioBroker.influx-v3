@@ -1,5 +1,5 @@
 /**
- * Migration helper: proposes `influx_v3.N` per-state settings from existing `influxdb.N` settings.
+ * Migration helper: proposes `influx-v3.N` per-state settings from existing `influxdb.N` settings.
  *
  * Read-only towards `influxdb.N`: its configuration is never changed or removed. Historical data
  * is NOT migrated (InfluxDB 1.x/2.x → 3 needs an export/import outside of ioBroker).
@@ -66,7 +66,7 @@ export function mapInfluxdbConfig(src: Record<string, unknown>): Record<string, 
  *
  * @param objects rows of the `system/custom` view: id → custom block
  * @param sourceInstance e.g. `influxdb.0`
- * @param targetNamespace e.g. `influx_v3.0`
+ * @param targetNamespace e.g. `influx-v3.0`
  */
 export function buildMigrationPreview(
     objects: { id: string; custom: Record<string, unknown> }[],

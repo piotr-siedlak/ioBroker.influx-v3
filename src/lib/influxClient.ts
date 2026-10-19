@@ -287,7 +287,7 @@ export class InfluxV3Client {
                     agent: this.agent,
                     headers: {
                         Accept: 'application/json',
-                        'User-Agent': 'iobroker.influx_v3',
+                        'User-Agent': 'iobroker.influx-v3',
                         ...this.authHeader(),
                         ...headers,
                         ...(body !== undefined ? { 'Content-Length': String(Buffer.byteLength(body)) } : {}),

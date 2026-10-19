@@ -426,7 +426,7 @@ export const GRAFANA_RANGE = "time >= TIMESTAMP '2026-10-19T09:00:00Z' AND time 
         });
 
         it('kill -9 of a writer in disk mode → the next start replays the spool', async () => {
-            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'influx_v3-kill9-'));
+            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'influx-v3-kill9-'));
             // one single node process (tsx as loader), so SIGKILL really kills the writer
             const child = spawn(
                 process.execPath,

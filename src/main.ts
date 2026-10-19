@@ -1,5 +1,5 @@
 /**
- * ioBroker adapter "influx_v3" — logs selected states into InfluxDB 3 (Core / Enterprise).
+ * ioBroker adapter "influx-v3" — logs selected states into InfluxDB 3 (Core / Enterprise).
  *
  * AdapterRuntime: lifecycle, subscriptions, per-state registry and sendTo commands.
  * The logic lives in src/lib/*; see docs/ARCHITECTURE.md.
@@ -105,7 +105,7 @@ export class InfluxV3Adapter extends utils.Adapter {
     private influxConnected = false;
 
     public constructor(options: Partial<utils.AdapterOptions> = {}) {
-        super({ ...options, name: 'influx_v3' });
+        super({ ...options, name: 'influx-v3' });
         this.on('ready', this.onReady.bind(this));
         this.on('stateChange', this.onStateChange.bind(this));
         this.on('objectChange', this.onObjectChange.bind(this));

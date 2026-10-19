@@ -1,6 +1,6 @@
-![Logo](../../admin/influx_v3.png)
+![Logo](../../admin/influx-v3.png)
 
-# ioBroker.influx_v3 — zapis do InfluxDB 3
+# ioBroker.influx-v3 — zapis do InfluxDB 3
 
 Adapter zapisuje wybrane stany ioBrokera do **InfluxDB 3 (Core / Enterprise)** przez natywne API HTTP v3.
 Konfiguracja odbywa się per stan (ikona zębatki w *Obiektach*), z wielowarstwowymi tagami, buforem odpornym na
@@ -10,10 +10,12 @@ awarie oraz odczytem historii i zapytaniami SQL. Jest to **niezależny** adapter
 🇬🇧 English: [README.md](../../README.md)
 
 > Status: **0.1.0, jeszcze nieopublikowany** w npm ani w repozytorium ioBrokera. Instalacja z GitHuba (niżej).
+> Repozytorium na GitHubie trzeba najpierw przemianować na `ioBroker.influx-v3`, dopiero wtedy poniższe adresy
+> zadziałają (zob. [docs/PUBLISHING.md](../PUBLISHING.md)).
 
 ## Funkcje
 
-* Włączanie i ustawienia per stan w *Obiekty → zębatka → influx_v3.N* (bez restartu adaptera)
+* Włączanie i ustawienia per stan w *Obiekty → zębatka → influx-v3.N* (bez restartu adaptera)
 * Dwa modele tabel: **grupowy** (wspólne tabele, tag `state_id`, zalecany) i **per-stan** (tabela na stan)
 * Tagi: globalne, automatyczne (room, function, adapter, instance, device, channel, unit, role, name), per stan,
   bezpieczne szablony (`{id.segment[2]}`, `{common.unit}`, `{enum.room}` …), opcjonalne tagi dynamiczne z innych
@@ -49,9 +51,9 @@ Szczegóły, zmierzone limity i źródła: [docs/RESEARCH.md](../RESEARCH.md).
 ## Instalacja (z GitHuba, obok klasycznego adaptera)
 
 1. ioBroker Admin → *Adaptery* → tryb eksperta → *Instaluj z własnego adresu URL* →
-   `https://github.com/piotr-siedlak/iobroker-influx_v3` (albo w konsoli:
-   `iobroker url https://github.com/piotr-siedlak/iobroker-influx_v3`).
-2. Dodaj instancję `influx_v3.0`. Istniejące `influxdb.0` działa dalej bez zmian.
+   `https://github.com/piotr-siedlak/ioBroker.influx-v3` (albo w konsoli:
+   `iobroker url https://github.com/piotr-siedlak/ioBroker.influx-v3`).
+2. Dodaj instancję `influx-v3.0`. Istniejące `influxdb.0` działa dalej bez zmian.
 3. Skonfiguruj połączenie (niżej) i włącz zapis wybranych stanów ikoną zębatki.
 
 ## Przygotowanie InfluxDB 3
@@ -98,7 +100,7 @@ i pokazuje edycję, wersję, istnienie bazy i retencję — nigdy token.
 
 ## Konfiguracja per stan (zębatka)
 
-*Obiekty* → zębatka przy stanie → sekcja **influx_v3.0** → *włączone*. Zakładki:
+*Obiekty* → zębatka przy stanie → sekcja **influx-v3.0** → *włączone*. Zakładki:
 
 * **Podstawowe:** tabela (puste = automatycznie), zapisz jako (auto/liczba/logiczna/tekst), tagi tego stanu,
   tylko zmiany, debounce, ponowny zapis, minimalna zmiana, **podgląd** wynikowego rekordu Line Protocol (bez zapisu)
@@ -145,7 +147,7 @@ Zob. [ADR-0001](../adr/0001-table-model-grouped-vs-per-state.md).
 
 * **grupowy** (domyślny): tabele `numeric_states` (Float64), `boolean_states` (Boolean), `string_states` (Utf8)
   albo własne tabele przez *tabelę* stanu lub *reguły tabel* instancji. **Jeden typ wartości na tabelę** – stan,
-  którego typ nie pasuje do tabeli, nie jest zapisywany i trafia do `influx_v3.N.info.conflicts`.
+  którego typ nie pasuje do tabeli, nie jest zapisywany i trafia do `influx-v3.N.info.conflicts`.
 * **per-stan**: tabela na każdy stan (nazwa = ID stanu lub alias), jak w klasycznym adapterze. InfluxDB 3 Core
   pozwala na **2000 tabel na serwer** – adapter ostrzega przy 80 % i odmawia tabel ponad *maks. tabel*.
 
@@ -164,7 +166,7 @@ Zob. [ADR-0002](../adr/0002-write-path-and-reliability.md). W skrócie:
   i losowym rozrzutem. Błędy walidacji (400/422) nigdy nie są ponawiane; częściowo przyjęte paczki są dzielone na
   zapisane i odrzucone rekordy (`info.rejectedRecords`, log z limitem). 401/403/404: dane są zachowywane,
   ponowienie po *authRetryMs*.
-* Bufor **w pamięci**: dane w RAM, przy zatrzymaniu zapisywane do `iobroker-data/influx_v3.N/spool`, wysyłane po
+* Bufor **w pamięci**: dane w RAM, przy zatrzymaniu zapisywane do `iobroker-data/influx-v3.N/spool`, wysyłane po
   starcie. Bufor **dyskowy**: każda paczka trafia tam przed wysłaniem; przetrwa `kill -9` i zanik zasilania (z fsync).
 * Dostarczanie **at-least-once** w granicach limitów; ponowne wysłanie jest idempotentne (InfluxDB 3 scala punkty
   o tej samej tabeli, tagach i czasie – zmierzone). **Nie ma gwarancji exactly-once.** Rekordy porzucone z powodu
@@ -174,20 +176,20 @@ Zob. [ADR-0002](../adr/0002-write-path-and-reliability.md). W skrócie:
 
 ```js
 // historia (format jak w innych adapterach historii)
-sendTo('influx_v3.0', 'getHistory', {
+sendTo('influx-v3.0', 'getHistory', {
     id: 'heat.0.hc1.temperature',
     options: { start: Date.now() - 86400000, end: Date.now(), aggregate: 'average', count: 300, ack: true, q: true },
 }, res => console.log(res.result, res.step, res.error));
 
 // SQL tylko do odczytu (SELECT/WITH/SHOW/DESCRIBE/EXPLAIN, jedno polecenie, limity wierszy/bajtów/czasu)
-sendTo('influx_v3.0', 'query', {
+sendTo('influx-v3.0', 'query', {
     query: 'SELECT time, value FROM numeric_states WHERE state_id = $id ORDER BY time DESC LIMIT 10',
     params: { id: 'heat.0.hc1.temperature' },
 }, res => console.log(res.result, res.truncated, res.error));
 
-sendTo('influx_v3.0', 'enableHistory', { id: 'heat.0.hc1.temperature', options: { customTags: [{ key: 'location', value: 'KOTLOWNIA' }] } }, cb);
-sendTo('influx_v3.0', 'disableHistory', { id: 'heat.0.hc1.temperature' }, cb);
-sendTo('influx_v3.0', 'getEnabledDPs', {}, cb);
+sendTo('influx-v3.0', 'enableHistory', { id: 'heat.0.hc1.temperature', options: { customTags: [{ key: 'location', value: 'KOTLOWNIA' }] } }, cb);
+sendTo('influx-v3.0', 'disableHistory', { id: 'heat.0.hc1.temperature' }, cb);
+sendTo('influx-v3.0', 'getEnabledDPs', {}, cb);
 ```
 
 Pozostałe polecenia: `queryInfluxQL`, `storeState` (import wartości z pominięciem filtrów), `flushBuffer`,

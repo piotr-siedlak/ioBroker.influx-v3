@@ -1,7 +1,7 @@
 {
     "common": {
         "custom": {
-            "influx_v3.0": {
+            "influx-v3.0": {
                 "enabled": true,
                 "table": "heating",
                 "storeAs": "",

@@ -1,4 +1,4 @@
-# Research report — ioBroker adapter for InfluxDB 3 (`influx_v3`)
+# Research report — ioBroker adapter for InfluxDB 3 (`influx-v3`)
 
 Date of research: **2026-10-19**. Every number in this document was either read from an
 official source listed in [Sources](#sources) or measured against a real server
@@ -10,11 +10,11 @@ Measured facts are marked **(measured)**; facts only taken from documentation ar
 
 | Item | Finding |
 | --- | --- |
-| URL | <https://github.com/piotr-siedlak/iobroker-influx_v3> |
+| URL | <https://github.com/piotr-siedlak/iobroker-influx_v3> (at the time of the research; target name `ioBroker.influx-v3`, see below) |
 | Visibility | public |
 | Refs | `git ls-remote` returned **no refs** → the repository is empty (no branches, no commits, no license file) |
 | Consequence | the adapter is created from scratch; license chosen in this project: **MIT** (same family as the ioBroker ecosystem, compatible with all used dependencies) |
-| Naming problem | the ioBroker repository checker requires the GitHub repository to be named `ioBroker.<adaptername>` (checks `E0002`/`E0003` in `M0000_PackageJson.js`). `iobroker-influx_v3` fails these checks. **Before publication the repository must be renamed to `ioBroker.influx_v3`** (GitHub keeps a redirect from the old name). Nothing in the code depends on the repository name except `package.json`/`io-package.json` URLs. |
+| Naming problem | the ioBroker repository checker requires the GitHub repository to be named `ioBroker.<adaptername>` (checks `E0002`/`E0003` in `M0000_PackageJson.js`). `iobroker-influx_v3` fails these checks. **Before the first push the repository must be renamed to `ioBroker.influx-v3`** (GitHub keeps a redirect from the old name). `package.json`/`io-package.json` already use the new URL. |
 
 ## 2. Versions chosen (and why)
 
@@ -35,9 +35,9 @@ Measured facts are marked **(measured)**; facts only taken from documentation ar
 
 Analysed: `src/main.ts` (4 301 lines), `admin/jsonCustom.json`, `io-package.json`.
 
-| Behaviour | Reference implementation | What `influx_v3` does |
+| Behaviour | Reference implementation | What `influx-v3` does |
 | --- | --- | --- |
-| Per-state configuration | `common.custom["influxdb.N"]`, `supportCustoms: true`, `adminUI.custom: "json"` | identical mechanism with key `influx_v3.N`; never reads or writes `influxdb.N` except in the explicit, read-only migration preview |
+| Per-state configuration | `common.custom["influxdb.N"]`, `supportCustoms: true`, `adminUI.custom: "json"` | identical mechanism with key `influx-v3.N`; never reads or writes `influxdb.N` except in the explicit, read-only migration preview |
 | Discovery at start | `getObjectView('system','custom')` | same |
 | Live re-configuration | `subscribeForeignObjects('*')` + `objectChange` | same, plus enum objects trigger re-computation of room/function tags |
 | State subscription | individual subscriptions, switch to `'*'` above 19 states | same idea, threshold configurable (default 20) |
@@ -164,23 +164,22 @@ Decision (ADR-0003): use a **small own HTTP client** built on `node:http`/`node:
 
 | Candidate | npm | ioBroker repo | Note |
 | --- | --- | --- | --- |
-| `influx_v3` (`iobroker.influx_v3`) | free (E404) | not listed | allowed characters (`[a-z0-9_-]`, checker `E0006`); clearly distinct from `influxdb`; **working name used in this code base** — but see the publication blocker below |
-| `influx-v3` (`iobroker.influx-v3`) | free (E404) | not listed | **recommended name for publication** (see below) |
+| `influx_v3` (`iobroker.influx_v3`) | free (E404) | not listed | preferred working name of the master prompt; allowed characters (checker `E0006`), **but rejected for new adapters** by checker `E4021` (see below) |
+| **`influx-v3`** (`iobroker.influx-v3`) | free (E404) | not listed | **chosen** (owner's decision 2026-10-19): passes `E0006`/`E4021`, clearly distinct from `influxdb` |
 | `influxdb3` | free | — | visually too close to `influxdb`, risk of confusion in admin lists |
 | `influx3`, `influxv3`, `influxdb-v3` | free | — | no advantage |
 
-Instance objects live under `influx_v3.N.*`; custom config under `common.custom["influx_v3.N"]`; the
-data directory is `iobroker-data/influx_v3.N/`. Nothing overlaps with `influxdb.N`.
+Instance objects live under `influx-v3.N.*`; custom config under `common.custom["influx-v3.N"]`; the
+data directory is `iobroker-data/influx-v3.N/`. Nothing overlaps with `influxdb.N`.
 UI product name: **InfluxDB 3**.
 
-**Publication blocker found while running the repository checker (v5.23.2, `lib/M4000_Repository.js`):**
-for every adapter that is not yet in the ioBroker repository the checker raises
-`[E4021] Adapter name should use "-" instead of "_"`. The working name `influx_v3` therefore cannot be added to
-the official repository. The master prompt asks to describe such a decision before renaming, so the code still
-uses `influx_v3`. Recommended for publication: adapter `influx-v3`, npm package `iobroker.influx-v3`, GitHub
-repository `ioBroker.influx-v3` (also fixes `E0002`/`E0003`). The rename touches `package.json`, `io-package.json`
-(`common.name`, URLs), the adapter name in `src/main.ts`, admin texts mentioning `influx_v3.N`, docs and tests; it
-must happen **before** the first public installation, because instance ids and `common.custom` keys change with it.
+**Naming decision.** While running the repository checker (v5.23.2, `lib/M4000_Repository.js`) it turned out
+that for every adapter not yet in the ioBroker repository the checker raises
+`[E4021] Adapter name should use "-" instead of "_"`, so the preferred working name `influx_v3` could not be
+published. As required by the master prompt the finding was described first; the owner then decided on
+**`influx-v3`** (npm `iobroker.influx-v3`, GitHub repository `ioBroker.influx-v3`, which also fixes
+`E0002`/`E0003`). The rename was done before any public installation, so no existing instance ids or
+`common.custom` keys are affected.
 
 ## 9. Risks
 

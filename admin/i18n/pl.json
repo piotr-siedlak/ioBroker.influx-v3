@@ -220,7 +220,7 @@
     "tip_Max. age of buffered data (h)": "Starsze paczki są odrzucane i liczone jako porzucone.",
     "tip_Max. batch size (bytes)": "Górny limit treści jednego żądania (limit serwera 10 MiB, tu maksymalnie 8 MiB).",
     "tip_Max. columns per table": "Limit kolumn serwera (Core domyślnie 500, łącznie z time i tagami).",
-    "tip_Max. disk buffer (bytes)": "Limit bufora dyskowego w iobroker-data/influx_v3.N/spool.",
+    "tip_Max. disk buffer (bytes)": "Limit bufora dyskowego w iobroker-data/influx-v3.N/spool.",
     "tip_Max. distinct values per dynamic tag": "Kolejne wartości są zapisywane jako _other.",
     "tip_Max. distinct values per tag key": "Ochrona kardynalności dla zmiennych tagów; kolejne wartości są zapisywane jako _other.",
     "tip_Max. memory buffer (bytes)": "Limit danych buforowanych w RAM.",

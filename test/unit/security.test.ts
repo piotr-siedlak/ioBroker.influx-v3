@@ -115,13 +115,13 @@ describe('security', () => {
         it('preview lists only enabled states of the selected source and flags existing configs', () => {
             const items = buildMigrationPreview(
                 [
-                    { id: 'b.0.x', custom: { 'influxdb.0': { enabled: true }, 'influx_v3.0': { enabled: true } } },
+                    { id: 'b.0.x', custom: { 'influxdb.0': { enabled: true }, 'influx-v3.0': { enabled: true } } },
                     { id: 'a.0.y', custom: { 'influxdb.0': { enabled: true } } },
                     { id: 'c.0.z', custom: { 'influxdb.0': { enabled: false } } },
                     { id: 'd.0.w', custom: { 'influxdb.1': { enabled: true } } },
                 ],
                 'influxdb.0',
-                'influx_v3.0',
+                'influx-v3.0',
             );
             assert.deepEqual(
                 items.map(i => [i.id, i.alreadyConfigured]),

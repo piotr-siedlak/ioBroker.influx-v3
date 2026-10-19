@@ -160,7 +160,7 @@ async function run(states: number, scenario: 'constant' | 'burst', db: string): 
                         }),
                     );
                 },
-                'system.adapter.influx_v3.0',
+                'system.adapter.influx-v3.0',
             ),
         );
     }
@@ -227,7 +227,7 @@ async function run(states: number, scenario: 'constant' | 'burst', db: string): 
 async function spoolRebuild(
     records: number,
 ): Promise<{ records: number; files: number; startMs: number; drainMs: number }> {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'influx_v3-load-spool-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'influx-v3-load-spool-'));
     const spool = new Spool(dir, false);
     await spool.init();
     let seq = 1;

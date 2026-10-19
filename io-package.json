@@ -1,6 +1,6 @@
 {
     "common": {
-        "name": "influx_v3",
+        "name": "influx-v3",
         "version": "0.1.0",
         "news": {
             "0.1.0": {
@@ -59,10 +59,10 @@
             "license": "MIT"
         },
         "platform": "Javascript/Node.js",
-        "icon": "influx_v3.png",
+        "icon": "influx-v3.png",
         "enabled": true,
-        "extIcon": "https://raw.githubusercontent.com/piotr-siedlak/iobroker-influx_v3/main/admin/influx_v3.png",
-        "readme": "https://github.com/piotr-siedlak/iobroker-influx_v3/blob/main/README.md",
+        "extIcon": "https://raw.githubusercontent.com/piotr-siedlak/ioBroker.influx-v3/main/admin/influx-v3.png",
+        "readme": "https://github.com/piotr-siedlak/ioBroker.influx-v3/blob/main/README.md",
         "loglevel": "info",
         "tier": 1,
         "mode": "daemon",

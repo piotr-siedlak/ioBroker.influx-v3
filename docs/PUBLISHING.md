@@ -3,18 +3,15 @@
 Nothing has been published: no npm release, no GitHub push, no PR to `ioBroker.repositories`. These steps need the
 owner's decision and credentials.
 
-## 1. Decide the final adapter name (blocking)
+## 1. Adapter name and GitHub repository (blocking)
 
-The repository checker 5.23.2 rejects new adapters with `_` in the name (`[E4021]`, see
-[RESEARCH.md §8](RESEARCH.md#8-naming-analysis)). Recommended: `influx-v3`.
+Done in code: the adapter is named **`influx-v3`** (npm `iobroker.influx-v3`); the checker rejects `_` in new
+adapter names (`[E4021]`, see [RESEARCH.md §8](RESEARCH.md#8-naming-analysis)).
 
-If accepted, rename **before the first public installation**:
-
-* `package.json` → `"name": "iobroker.influx-v3"`, repository/bugs/homepage URLs
-* `io-package.json` → `common.name`, `extIcon`, `readme`, icon file name (`admin/influx-v3.png`)
-* `src/main.ts` → `name: 'influx-v3'`
-* texts mentioning `influx_v3.N` in `admin/i18n/*.json`, README, docs, tests (`test/integration.js`, `scripts/`)
-* GitHub: rename the repository to `ioBroker.influx-v3` (GitHub redirects the old URL)
+Still to do **before the first push**: rename the GitHub repository `piotr-siedlak/iobroker-influx_v3` to
+`ioBroker.influx-v3` (*Settings → Repository name*; GitHub redirects the old URL). `package.json` and
+`io-package.json` already point to `https://github.com/piotr-siedlak/ioBroker.influx-v3`; the checker compares them
+with the repository's clone URL (`E0019`) and requires the `ioBroker.` prefix (`E0002`/`E0003`).
 
 ## 2. GitHub repository
 

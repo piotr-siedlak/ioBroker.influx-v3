@@ -220,7 +220,7 @@
     "tip_Max. age of buffered data (h)": "Older buffered batches are discarded and counted as dropped.",
     "tip_Max. batch size (bytes)": "Upper limit of one request body (server limit 10 MiB, maximum here 8 MiB).",
     "tip_Max. columns per table": "Column limit of the server (Core default 500, including time and tags).",
-    "tip_Max. disk buffer (bytes)": "Limit of the disk buffer in iobroker-data/influx_v3.N/spool.",
+    "tip_Max. disk buffer (bytes)": "Limit of the disk buffer in iobroker-data/influx-v3.N/spool.",
     "tip_Max. distinct values per dynamic tag": "Further values are written as _other.",
     "tip_Max. distinct values per tag key": "Cardinality protection for variable tags; further values are written as _other.",
     "tip_Max. memory buffer (bytes)": "Limit of buffered data in RAM.",

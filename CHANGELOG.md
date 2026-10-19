@@ -1,12 +1,12 @@
 # Changelog
 
-All notable changes of `iobroker.influx_v3`. The same entries are kept in the `## Changelog` section of
+All notable changes of `iobroker.influx-v3`. The same entries are kept in the `## Changelog` section of
 README.md (required by the ioBroker release script).
 
 ## 0.1.0 (2026-10-19)
 
 * Initial version
-* Per-state logging (`common.custom["influx_v3.N"]`) to InfluxDB 3 Core/Enterprise via `/api/v3/write_lp`,
+* Per-state logging (`common.custom["influx-v3.N"]`) to InfluxDB 3 Core/Enterprise via `/api/v3/write_lp`,
   millisecond precision, live re-configuration without restart
 * Table models `grouped` (default) and `per-state`, one value type per table, table/column limit checks
 * Tag engine: global, automatic, per-state, removal, reserved keys; safe templates; dynamic tags (opt-in);

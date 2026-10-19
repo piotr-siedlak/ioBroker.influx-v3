@@ -1,6 +1,6 @@
 /**
  * ConfigurationService: normalisation and validation of the instance configuration (`native`)
- * and of the per-state configuration (`common.custom["influx_v3.N"]`).
+ * and of the per-state configuration (`common.custom["influx-v3.N"]`).
  *
  * Every value is clamped into a documented range; invalid values fall back to the default and
  * produce a warning instead of crashing the adapter.

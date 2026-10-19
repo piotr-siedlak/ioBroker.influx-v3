@@ -67,7 +67,7 @@ async function waitFor(fn, timeoutMs = 15000) {
     }
 }
 
-function sendTo(harness, command, message, instance = 'influx_v3.0') {
+function sendTo(harness, command, message, instance = 'influx-v3.0') {
     return new Promise(resolve => harness.sendTo(instance, command, message, resolve));
 }
 
@@ -86,15 +86,15 @@ tests.integration(path.join(__dirname, '..'), {
             it('starts, reports info.connection=false and stops cleanly', async function () {
                 this.timeout(60000);
                 const harness = getHarness();
-                await harness.changeAdapterConfig('influx_v3', { native: { url: 'http://127.0.0.1:1', token: 'apiv3_unit', pingIntervalSec: 10 } });
+                await harness.changeAdapterConfig('influx-v3', { native: { url: 'http://127.0.0.1:1', token: 'apiv3_unit', pingIntervalSec: 10 } });
                 await harness.startAdapterAndWait();
                 await sleep(2000);
-                const conn = await harness.states.getStateAsync('influx_v3.0.info.connection');
+                const conn = await harness.states.getStateAsync('influx-v3.0.info.connection');
                 assert.equal(conn && conn.val, false);
-                const obj = await harness.objects.getObjectAsync('influx_v3.0.info.queueRecords');
+                const obj = await harness.objects.getObjectAsync('influx-v3.0.info.queueRecords');
                 assert.ok(obj, 'instance objects created');
                 // the token is stored encrypted and never logged
-                const inst = await harness.objects.getObjectAsync('system.adapter.influx_v3.0');
+                const inst = await harness.objects.getObjectAsync('system.adapter.influx-v3.0');
                 assert.notEqual(inst.native.token, 'apiv3_unit');
                 assert.ok(!harness.getLogs().some(l => l.message.includes('apiv3_unit')), 'token must not appear in logs');
                 await harness.stopAdapter();
@@ -126,7 +126,7 @@ tests.integration(path.join(__dirname, '..'), {
                     stateObject(
                         'number',
                         {
-                            'influx_v3.0': {
+                            'influx-v3.0': {
                                 enabled: true,
                                 changesOnly: false,
                                 customTags: [
@@ -140,11 +140,11 @@ tests.integration(path.join(__dirname, '..'), {
                         { unit: '°C' },
                     ),
                 );
-                await harness.objects.setObjectAsync(objects.bool, stateObject('boolean', { 'influx_v3.0': { enabled: true, changesOnly: false } }));
-                await harness.objects.setObjectAsync(objects.str, stateObject('string', { 'influx_v3.0': { enabled: true } }));
-                await harness.objects.setObjectAsync(objects.other, stateObject('number', { 'influx_v3.1': { enabled: true } }));
+                await harness.objects.setObjectAsync(objects.bool, stateObject('boolean', { 'influx-v3.0': { enabled: true, changesOnly: false } }));
+                await harness.objects.setObjectAsync(objects.str, stateObject('string', { 'influx-v3.0': { enabled: true } }));
+                await harness.objects.setObjectAsync(objects.other, stateObject('number', { 'influx-v3.1': { enabled: true } }));
                 await harness.objects.setObjectAsync(objects.later, stateObject('number', {}));
-                await harness.changeAdapterConfig('influx_v3', {
+                await harness.changeAdapterConfig('influx-v3', {
                     native: {
                         url: URL,
                         token: TOKEN,
@@ -156,7 +156,7 @@ tests.integration(path.join(__dirname, '..'), {
                     },
                 });
                 await harness.startAdapterAndWait();
-                await waitFor(async () => (await harness.states.getStateAsync('influx_v3.0.info.connection'))?.val === true);
+                await waitFor(async () => (await harness.states.getStateAsync('influx-v3.0.info.connection'))?.val === true);
             });
 
             it('registers only the states configured for this instance', async function () {
@@ -196,7 +196,7 @@ tests.integration(path.join(__dirname, '..'), {
                 const s = await waitFor(async () => (await sql(`SELECT value FROM string_states WHERE state_id = '${objects.str}'`))[0]);
                 assert.equal(s.value, 'hello "world"');
                 const other = await sql(`SELECT count(*) AS n FROM numeric_states WHERE state_id = '${objects.other}'`);
-                assert.equal(Number(other[0].n), 0, 'state of influx_v3.1 must not be written by influx_v3.0');
+                assert.equal(Number(other[0].n), 0, 'state of influx-v3.1 must not be written by influx-v3.0');
             });
 
             it('getHistory returns the stored values', async function () {
@@ -213,7 +213,7 @@ tests.integration(path.join(__dirname, '..'), {
                 this.timeout(20000);
                 // Admin sends the complete (unsaved) form data of the custom dialog
                 const obj = await harness.objects.getObjectAsync(objects.num);
-                const config = { ...obj.common.custom['influx_v3.0'], table: 'heating' };
+                const config = { ...obj.common.custom['influx-v3.0'], table: 'heating' };
                 const res = await sendTo(harness, 'previewMapping', { id: objects.num, config });
                 assert.match(res.text, /Table: heating/);
                 assert.match(res.text, /location=KOTLOWNIA/);
@@ -237,7 +237,7 @@ tests.integration(path.join(__dirname, '..'), {
                 await sendTo(harness, 'enableHistory', { id: objects.num, options: { debounceTime: 0 } });
                 const obj = await harness.objects.getObjectAsync(objects.num);
                 assert.deepEqual(obj.common.custom['influxdb.0'], classicCustom);
-                assert.deepEqual(obj.common.custom['influx_v3.0'].customTags[0], { key: 'Location', value: 'KOTLOWNIA' });
+                assert.deepEqual(obj.common.custom['influx-v3.0'].customTags[0], { key: 'Location', value: 'KOTLOWNIA' });
             });
 
             it('disableHistory stops writing immediately', async function () {
@@ -254,7 +254,7 @@ tests.integration(path.join(__dirname, '..'), {
             it('changing the custom config of another instance does not affect this one', async function () {
                 this.timeout(20000);
                 const obj = await harness.objects.getObjectAsync(objects.num);
-                obj.common.custom['influx_v3.1'] = { enabled: true, table: 'elsewhere' };
+                obj.common.custom['influx-v3.1'] = { enabled: true, table: 'elsewhere' };
                 await harness.objects.setObjectAsync(objects.num, obj);
                 await sleep(1000);
                 const dps = await sendTo(harness, 'getEnabledDPs', {});
@@ -287,36 +287,36 @@ tests.integration(path.join(__dirname, '..'), {
                 this.timeout(90000);
                 const DB2 = 'iobharness2';
                 // second instance object: copy of instance 0 (keeps the encrypted token) with another database
-                const inst0 = await harness.objects.getObjectAsync('system.adapter.influx_v3.0');
+                const inst0 = await harness.objects.getObjectAsync('system.adapter.influx-v3.0');
                 const inst1 = JSON.parse(JSON.stringify(inst0));
-                inst1._id = 'system.adapter.influx_v3.1';
+                inst1._id = 'system.adapter.influx-v3.1';
                 inst1.common.enabled = true;
                 inst1.native.database = DB2;
                 inst1.native.globalTags = [{ key: 'site', value: 'second' }];
                 await harness.objects.setObjectAsync(inst1._id, inst1);
                 for (const o of ioPackage.instanceObjects) {
-                    await harness.objects.setObjectAsync(`influx_v3.1.${o._id}`, { ...o, _id: `influx_v3.1.${o._id}` });
+                    await harness.objects.setObjectAsync(`influx-v3.1.${o._id}`, { ...o, _id: `influx-v3.1.${o._id}` });
                 }
                 const both = `${BASE}.both`;
                 const onlySecond = `${BASE}.onlySecond`;
                 await harness.objects.setObjectAsync(
                     both,
                     stateObject('number', {
-                        'influx_v3.0': { enabled: true, changesOnly: false, table: 'multi_a', customTags: [{ key: 'inst', value: 'zero' }] },
-                        'influx_v3.1': { enabled: true, changesOnly: false, table: 'multi_b', customTags: [{ key: 'inst', value: 'one' }] },
+                        'influx-v3.0': { enabled: true, changesOnly: false, table: 'multi_a', customTags: [{ key: 'inst', value: 'zero' }] },
+                        'influx-v3.1': { enabled: true, changesOnly: false, table: 'multi_b', customTags: [{ key: 'inst', value: 'one' }] },
                     }),
                 );
-                await harness.objects.setObjectAsync(onlySecond, stateObject('number', { 'influx_v3.1': { enabled: true, changesOnly: false } }));
+                await harness.objects.setObjectAsync(onlySecond, stateObject('number', { 'influx-v3.1': { enabled: true, changesOnly: false } }));
 
                 const proc = spawn('node', ['build/main.js', '--console', '--instance', '1'], { cwd: harness.testAdapterDir, stdio: ['ignore', 'pipe', 'pipe'] });
                 let output = '';
                 proc.stdout.on('data', d => (output += d));
                 proc.stderr.on('data', d => (output += d));
                 try {
-                    await waitFor(async () => (await harness.states.getStateAsync('influx_v3.1.info.connection'))?.val === true, 30000);
+                    await waitFor(async () => (await harness.states.getStateAsync('influx-v3.1.info.connection'))?.val === true, 30000);
                     await waitFor(async () => Object.keys(await sendTo(harness, 'getEnabledDPs', {})).includes(both));
                     const dps1 = await waitFor(async () => {
-                        const r = await sendTo(harness, 'getEnabledDPs', {}, 'influx_v3.1');
+                        const r = await sendTo(harness, 'getEnabledDPs', {}, 'influx-v3.1');
                         return Object.keys(r).includes(both) && Object.keys(r).includes(onlySecond) ? r : null;
                     }, 30000);
                     assert.equal(dps1[both].table, 'multi_b');

@@ -1,6 +1,6 @@
-![Logo](admin/influx_v3.png)
+![Logo](admin/influx-v3.png)
 
-# ioBroker.influx_v3 — InfluxDB 3 logging
+# ioBroker.influx-v3 — InfluxDB 3 logging
 
 Logs selected ioBroker states into **InfluxDB 3 (Core / Enterprise)** using the native v3 HTTP API, with per-state
 configuration (gear icon in *Objects*), layered tags, a crash-safe buffer and history/SQL access.
@@ -10,12 +10,12 @@ its instances or settings.
 🇵🇱 **Polska dokumentacja:** [docs/pl/README.md](docs/pl/README.md)
 
 > Status: **0.1.0, not yet published** to npm or the ioBroker repository. Install from GitHub (see below).
-> The technical name `influx_v3` is a working name: the ioBroker repository checker requires `-` instead of `_`
-> for new adapters, so the published name will probably be `influx-v3` (see [docs/PUBLISHING.md](docs/PUBLISHING.md)).
+> The GitHub repository still has to be renamed to `ioBroker.influx-v3` before the URLs below work
+> (see [docs/PUBLISHING.md](docs/PUBLISHING.md)).
 
 ## Features
 
-* Per-state activation and settings in *Objects → gear icon → influx_v3.N* (no restart needed)
+* Per-state activation and settings in *Objects → gear icon → influx-v3.N* (no restart needed)
 * Two table models: **grouped** (shared tables, `state_id` tag, recommended) and **per-state** (one table per state)
 * Tags: global, automatic (room, function, adapter, instance, device, channel, unit, role, name), per-state,
   safe templates (`{id.segment[2]}`, `{common.unit}`, `{enum.room}` …), optional dynamic tags from other states;
@@ -51,9 +51,9 @@ Details, measured limits and sources: [docs/RESEARCH.md](docs/RESEARCH.md).
 ## Installation (from GitHub, next to the classic adapter)
 
 1. ioBroker Admin → *Adapters* → expert mode → *Install from custom URL* →
-   `https://github.com/piotr-siedlak/iobroker-influx_v3` (or on the console:
-   `iobroker url https://github.com/piotr-siedlak/iobroker-influx_v3`).
-2. Add an instance `influx_v3.0`. An existing `influxdb.0` keeps working unchanged.
+   `https://github.com/piotr-siedlak/ioBroker.influx-v3` (or on the console:
+   `iobroker url https://github.com/piotr-siedlak/ioBroker.influx-v3`).
+2. Add an instance `influx-v3.0`. An existing `influxdb.0` keeps working unchanged.
 3. Configure the connection (below) and enable logging for states via the gear icon.
 
 ## InfluxDB 3 setup
@@ -90,7 +90,7 @@ On **Enterprise**, create a resource token with read+write permission for the on
 
 ## Per-state configuration
 
-*Objects* → gear icon of a state → section **influx_v3.0** → *enabled*. Tabs:
+*Objects* → gear icon of a state → section **influx-v3.0** → *enabled*. Tabs:
 
 * **Basic:** table (empty = automatic), store as (auto/number/boolean/text), tags of this state, changes only,
   debounce, re-log interval, minimal delta, **preview** of the resulting line protocol (not saved)
@@ -132,7 +132,7 @@ See [ADR-0001](docs/adr/0001-table-model-grouped-vs-per-state.md).
 
 * **grouped** (default): tables `numeric_states` (Float64), `boolean_states` (Boolean), `string_states` (Utf8) or
   your own tables via per-state *table* / instance *table rules*. **One value type per table** – a state whose type
-  does not fit its table is not written and listed in `influx_v3.N.info.conflicts`.
+  does not fit its table is not written and listed in `influx-v3.N.info.conflicts`.
 * **per-state**: one table per state (name = state id or alias), like the classic adapter. InfluxDB 3 Core allows
   only **2 000 tables per server** – the adapter warns at 80 % and refuses tables beyond *max. tables*.
 
@@ -151,7 +151,7 @@ See [ADR-0002](docs/adr/0002-write-path-and-reliability.md). Summary:
   and jitter. Validation errors (400/422) are never retried; partially accepted batches are split into written and
   rejected records (`info.rejectedRecords`, log with rate limit). 401/403/404: data is kept, retry after
   *authRetryMs*.
-* **memory** buffer: data in RAM, written to `iobroker-data/influx_v3.N/spool` on shutdown, replayed after start.
+* **memory** buffer: data in RAM, written to `iobroker-data/influx-v3.N/spool` on shutdown, replayed after start.
   **disk** buffer: every batch is written there before sending; survives `kill -9` and power loss (with fsync).
 * Delivery is **at-least-once** within the limits; replay is idempotent (InfluxDB 3 merges points with identical
   table, tags and timestamp – measured). **Not exactly-once.** Records dropped by limits are counted in
@@ -161,27 +161,27 @@ See [ADR-0002](docs/adr/0002-write-path-and-reliability.md). Summary:
 
 ```js
 // history (same format as other history adapters)
-sendTo('influx_v3.0', 'getHistory', {
+sendTo('influx-v3.0', 'getHistory', {
     id: 'heat.0.hc1.temperature',
     options: { start: Date.now() - 86400000, end: Date.now(), aggregate: 'average', count: 300, ack: true, q: true },
 }, res => console.log(res.result, res.step, res.error));
 
 // read-only SQL (SELECT/WITH/SHOW/DESCRIBE/EXPLAIN, one statement, row/byte/time limits)
-sendTo('influx_v3.0', 'query', {
+sendTo('influx-v3.0', 'query', {
     query: 'SELECT time, value FROM numeric_states WHERE state_id = $id ORDER BY time DESC LIMIT 10',
     params: { id: 'heat.0.hc1.temperature' },
 }, res => console.log(res.result, res.truncated, res.error));
 
-sendTo('influx_v3.0', 'queryInfluxQL', 'SELECT mean(value) FROM numeric_states WHERE time > now() - 1h GROUP BY time(5m)', cb);
+sendTo('influx-v3.0', 'queryInfluxQL', 'SELECT mean(value) FROM numeric_states WHERE time > now() - 1h GROUP BY time(5m)', cb);
 
-sendTo('influx_v3.0', 'enableHistory', { id: 'heat.0.hc1.temperature', options: { changesOnly: true, customTags: [{ key: 'location', value: 'KOTLOWNIA' }] } }, cb);
-sendTo('influx_v3.0', 'disableHistory', { id: 'heat.0.hc1.temperature' }, cb);
-sendTo('influx_v3.0', 'getEnabledDPs', {}, cb);         // { id: settings + table + conflict }
-sendTo('influx_v3.0', 'storeState', { id, state: [{ val: 1, ts: 1792418400000 }] }, cb); // import values (bypasses filters)
-sendTo('influx_v3.0', 'flushBuffer', {}, cb);
-sendTo('influx_v3.0', 'getSchema', {}, cb);              // tables, columns, retention
-sendTo('influx_v3.0', 'getAdapterStats', {}, cb);        // counters, buffer, conflicts
-sendTo('influx_v3.0', 'previewMapping', { id, config }, cb); // table, tags and line protocol of a (draft) config
+sendTo('influx-v3.0', 'enableHistory', { id: 'heat.0.hc1.temperature', options: { changesOnly: true, customTags: [{ key: 'location', value: 'KOTLOWNIA' }] } }, cb);
+sendTo('influx-v3.0', 'disableHistory', { id: 'heat.0.hc1.temperature' }, cb);
+sendTo('influx-v3.0', 'getEnabledDPs', {}, cb);         // { id: settings + table + conflict }
+sendTo('influx-v3.0', 'storeState', { id, state: [{ val: 1, ts: 1792418400000 }] }, cb); // import values (bypasses filters)
+sendTo('influx-v3.0', 'flushBuffer', {}, cb);
+sendTo('influx-v3.0', 'getSchema', {}, cb);              // tables, columns, retention
+sendTo('influx-v3.0', 'getAdapterStats', {}, cb);        // counters, buffer, conflicts
+sendTo('influx-v3.0', 'previewMapping', { id, config }, cb); // table, tags and line protocol of a (draft) config
 ```
 
 `getHistory` aggregates: `none`/`onchange` (raw, plus one border value on each side unless `removeBorderValues`),

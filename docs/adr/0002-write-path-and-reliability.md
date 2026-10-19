@@ -33,7 +33,7 @@ Status: accepted (2026-10-19)
 
 * `memory` (default): pending batches live in RAM. On shutdown they are written to the spool directory
   (`persistOnShutdown`, default on) and replayed at the next start. A crash (`kill -9`) loses the RAM content.
-* `disk`: every batch is written to `iobroker-data/influx_v3.N/spool/` (`.tmp` → `fsync` → `rename`) **before**
+* `disk`: every batch is written to `iobroker-data/influx-v3.N/spool/` (`.tmp` → `fsync` → `rename`) **before**
   it is sent and deleted after the server acknowledged it. After a crash all unacknowledged batches are
   replayed. Data still in the open batch (≤ `flushIntervalMs`) can be lost.
 

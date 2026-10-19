@@ -1,4 +1,4 @@
-# Architecture — `influx_v3`
+# Architecture — `influx-v3`
 
 The adapter is a TypeScript `daemon` adapter (`@iobroker/adapter-core`) without runtime dependencies
 other than `adapter-core`. All logic that can be tested without ioBroker or InfluxDB lives in pure modules
@@ -19,7 +19,7 @@ ioBroker ───────────────────────�
 | Module (file) | Responsibility | Pure? |
 | --- | --- | --- |
 | `AdapterRuntime` (`src/main.ts`) | lifecycle (`onReady`, `onStateChange`, `onObjectChange`, `onMessage`, `onUnload`), subscriptions, `info.*` states, wiring | no |
-| `ConfigurationService` (`lib/config.ts`) | normalises and validates instance config (`native`) and per-state config (`common.custom["influx_v3.N"]`), applies instance defaults, clamps ranges, returns typed objects + validation messages | yes |
+| `ConfigurationService` (`lib/config.ts`) | normalises and validates instance config (`native`) and per-state config (`common.custom["influx-v3.N"]`), applies instance defaults, clamps ranges, returns typed objects + validation messages | yes |
 | `StateRegistry` (`lib/stateRegistry.ts`) | map *real id → registered state* (config, context, pipeline, resolved mapping); alias map; decides between individual and wildcard subscription; change detection (config hash) so unchanged objects are ignored | yes |
 | `FilterPipeline` (`lib/filterPipeline.ts`) | per state: ack/q filters, coercion, ignore filters, debounce, blockTime, changesOnly, minDelta, relog timer, "last skipped value" logging, initial value. Timers are injected (testable with fake clocks) | yes |
 | `TagResolver` (`lib/tagResolver.ts`) | layered tags, safe templates, key normalisation, collision detection, sanitisation, sensitive-data guard, cardinality guard, dynamic tags | yes |
@@ -31,7 +31,7 @@ ioBroker ───────────────────────�
 | `HistoryService` (`lib/historyService.ts`) | translates ioBroker `getHistory` options into parameterised SQL (`date_bin`, `selector_min/max`, `approx_percentile_cont`), maps rows to `{val, ts, ack, q, from}` | pure SQL builder + I/O |
 | `QueryService` (`lib/queryService.ts`) | read-only guard for user SQL/InfluxQL, row/size limits, sender allow-list | pure guard + I/O |
 | `Observability` (`lib/observability.ts`) | counters, last success/error times, periodic (10 s) publication to `info.*`, never written to InfluxDB unless explicitly enabled | yes |
-| `Migration` (`lib/migration.ts`) | explicit, previewable copy of `influxdb.N` per-state settings into `influx_v3.N` | pure mapping + I/O on user request |
+| `Migration` (`lib/migration.ts`) | explicit, previewable copy of `influxdb.N` per-state settings into `influx-v3.N` | pure mapping + I/O on user request |
 | `redact` (`lib/redact.ts`) | removes tokens/authorization headers from any text that may be logged or returned | yes |
 
 ## Data flow of one state change
@@ -49,9 +49,9 @@ ioBroker ───────────────────────�
 
 ## Configuration objects
 
-* Instance (`system.adapter.influx_v3.N` → `native`): connection, write, buffer, schema, tags,
+* Instance (`system.adapter.influx-v3.N` → `native`): connection, write, buffer, schema, tags,
   defaults for states, history, advanced. Token: `encryptedNative` + `protectedNative`.
-* Per state (`common.custom["influx_v3.N"]`): `enabled` (provided by Admin), table/alias, store type,
+* Per state (`common.custom["influx-v3.N"]`): `enabled` (provided by Admin), table/alias, store type,
   field (per-state mode only), tags, tag switches, filters, metadata switches. Admin dialog:
   `admin/jsonCustom.json`. Two instances never share configuration: every lookup uses `this.namespace`.
 
@@ -89,7 +89,7 @@ optional sender allow-list; no HTTP port is opened by the adapter.
 ## Directory layout
 
 ```text
-admin/            jsonConfig.json, jsonCustom.json, i18n/<lang>.json, influx_v3.png
+admin/            jsonConfig.json, jsonCustom.json, i18n/<lang>.json, influx-v3.png
 src/main.ts       AdapterRuntime
 src/lib/*.ts      modules above
 test/unit/        mocha unit tests (no network)

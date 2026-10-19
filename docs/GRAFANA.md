@@ -1,4 +1,4 @@
-# Grafana with InfluxDB 3 and `influx_v3`
+# Grafana with InfluxDB 3 and `influx-v3`
 
 All queries on this page are **SQL for InfluxDB 3** (not Flux). Every query below is executed by the
 automated test suite (`test/influx/influx3.test.ts`, section "Grafana scenarios") against a real
