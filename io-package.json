@@ -43,8 +43,17 @@
             "uk": "Записує вибрані стани в InfluxDB 3 (Core/Enterprise) з налаштовуваними тегами та читає історію через SQL",
             "zh-cn": "将选定状态记录到 InfluxDB 3（Core/Enterprise），支持可配置标签，并通过 SQL 读取历史"
         },
-        "authors": ["Piotr Siedlak <siedlak.piotr@gmail.com>"],
-        "keywords": ["influxdb", "influxdb3", "history", "logging", "sql", "grafana"],
+        "authors": [
+            "Piotr Siedlak <siedlak.piotr@gmail.com>"
+        ],
+        "keywords": [
+            "influxdb",
+            "influxdb3",
+            "history",
+            "logging",
+            "sql",
+            "grafana"
+        ],
         "licenseInformation": {
             "type": "free",
             "license": "MIT"
@@ -81,8 +90,12 @@
             }
         ]
     },
-    "encryptedNative": ["token"],
-    "protectedNative": ["token"],
+    "encryptedNative": [
+        "token"
+    ],
+    "protectedNative": [
+        "token"
+    ],
     "native": {
         "edition": "auto",
         "url": "http://localhost:8181",
@@ -93,7 +106,6 @@
         "requestTimeoutMs": 10000,
         "pingIntervalSec": 60,
         "createDatabaseRetention": "",
-
         "writeMode": "batched",
         "batchMaxLines": 5000,
         "batchMaxBytes": 1048576,
@@ -104,7 +116,6 @@
         "retryBaseDelayMs": 1000,
         "retryMaxDelayMs": 60000,
         "authRetryMs": 300000,
-
         "bufferMode": "memory",
         "bufferMaxRecords": 200000,
         "bufferMaxBytes": 33554432,
@@ -114,7 +125,6 @@
         "persistOnShutdown": true,
         "spoolFsync": true,
         "shutdownFlushTimeoutMs": 5000,
-
         "schemaMode": "grouped",
         "tableNumber": "numeric_states",
         "tableBoolean": "boolean_states",
@@ -128,7 +138,6 @@
         "metaAck": "field",
         "metaQ": "field",
         "metaFrom": "none",
-
         "globalTags": [],
         "tagKeyStyle": "snake",
         "autoTagRoom": true,
@@ -147,7 +156,6 @@
         "dynamicTagsEnabled": false,
         "dynamicTagTtlSec": 3600,
         "dynamicTagMaxValues": 100,
-
         "changesOnly": true,
         "debounceTime": 0,
         "blockTime": 0,
@@ -161,7 +169,6 @@
         "storeAck": true,
         "storeQ": true,
         "storeFrom": false,
-
         "historyMaxRows": 2000,
         "historyHardLimit": 100000,
         "queryTimeoutMs": 30000,
@@ -170,12 +177,13 @@
         "defaultAggregate": "average",
         "querySenders": "",
         "allowUserQueries": true,
-
         "subscribeAllThreshold": 20,
         "logRejectedLimitPerMin": 10,
         "statsIntervalSec": 10,
         "writeStatsToInflux": false,
-        "debugStates": false
+        "debugStates": false,
+        "migrationSource": "",
+        "migrationOverwrite": false
     },
     "objects": [],
     "instanceObjects": [
@@ -213,7 +221,11 @@
             "type": "state",
             "common": {
                 "role": "info.firmware",
-                "name": { "en": "InfluxDB server version and edition", "de": "InfluxDB-Serverversion und Edition", "pl": "Wersja i edycja serwera InfluxDB" },
+                "name": {
+                    "en": "InfluxDB server version and edition",
+                    "de": "InfluxDB-Serverversion und Edition",
+                    "pl": "Wersja i edycja serwera InfluxDB"
+                },
                 "type": "string",
                 "read": true,
                 "write": false,
@@ -226,7 +238,11 @@
             "type": "state",
             "common": {
                 "role": "date",
-                "name": { "en": "Last successful write", "de": "Letzter erfolgreicher Schreibvorgang", "pl": "Ostatni udany zapis" },
+                "name": {
+                    "en": "Last successful write",
+                    "de": "Letzter erfolgreicher Schreibvorgang",
+                    "pl": "Ostatni udany zapis"
+                },
                 "type": "number",
                 "read": true,
                 "write": false,
@@ -239,7 +255,11 @@
             "type": "state",
             "common": {
                 "role": "date",
-                "name": { "en": "Last successful read", "de": "Letzter erfolgreicher Lesevorgang", "pl": "Ostatni udany odczyt" },
+                "name": {
+                    "en": "Last successful read",
+                    "de": "Letzter erfolgreicher Lesevorgang",
+                    "pl": "Ostatni udany odczyt"
+                },
                 "type": "number",
                 "read": true,
                 "write": false,
@@ -252,7 +272,11 @@
             "type": "state",
             "common": {
                 "role": "text",
-                "name": { "en": "Last error (secrets removed)", "de": "Letzter Fehler (ohne Geheimnisse)", "pl": "Ostatni błąd (bez sekretów)" },
+                "name": {
+                    "en": "Last error (secrets removed)",
+                    "de": "Letzter Fehler (ohne Geheimnisse)",
+                    "pl": "Ostatni błąd (bez sekretów)"
+                },
                 "type": "string",
                 "read": true,
                 "write": false,
@@ -265,7 +289,11 @@
             "type": "state",
             "common": {
                 "role": "value",
-                "name": { "en": "Records waiting in buffer", "de": "Datensätze im Puffer", "pl": "Rekordy oczekujące w buforze" },
+                "name": {
+                    "en": "Records waiting in buffer",
+                    "de": "Datensätze im Puffer",
+                    "pl": "Rekordy oczekujące w buforze"
+                },
                 "type": "number",
                 "read": true,
                 "write": false,
@@ -279,7 +307,11 @@
             "common": {
                 "role": "value",
                 "unit": "B",
-                "name": { "en": "Size of disk buffer", "de": "Größe des Festplattenpuffers", "pl": "Rozmiar bufora dyskowego" },
+                "name": {
+                    "en": "Size of disk buffer",
+                    "de": "Größe des Festplattenpuffers",
+                    "pl": "Rozmiar bufora dyskowego"
+                },
                 "type": "number",
                 "read": true,
                 "write": false,
@@ -292,7 +324,11 @@
             "type": "state",
             "common": {
                 "role": "value",
-                "name": { "en": "Records written since start", "de": "Seit Start geschriebene Datensätze", "pl": "Rekordy zapisane od startu" },
+                "name": {
+                    "en": "Records written since start",
+                    "de": "Seit Start geschriebene Datensätze",
+                    "pl": "Rekordy zapisane od startu"
+                },
                 "type": "number",
                 "read": true,
                 "write": false,
@@ -305,7 +341,11 @@
             "type": "state",
             "common": {
                 "role": "value",
-                "name": { "en": "Records rejected (invalid or refused by server)", "de": "Abgelehnte Datensätze", "pl": "Rekordy odrzucone (błędne lub odrzucone przez serwer)" },
+                "name": {
+                    "en": "Records rejected (invalid or refused by server)",
+                    "de": "Abgelehnte Datensätze",
+                    "pl": "Rekordy odrzucone (błędne lub odrzucone przez serwer)"
+                },
                 "type": "number",
                 "read": true,
                 "write": false,
@@ -318,7 +358,11 @@
             "type": "state",
             "common": {
                 "role": "value",
-                "name": { "en": "Records dropped because of buffer limits", "de": "Wegen Pufferlimit verworfene Datensätze", "pl": "Rekordy porzucone z powodu limitu bufora" },
+                "name": {
+                    "en": "Records dropped because of buffer limits",
+                    "de": "Wegen Pufferlimit verworfene Datensätze",
+                    "pl": "Rekordy porzucone z powodu limitu bufora"
+                },
                 "type": "number",
                 "read": true,
                 "write": false,
@@ -331,7 +375,11 @@
             "type": "state",
             "common": {
                 "role": "value",
-                "name": { "en": "Number of logged states", "de": "Anzahl protokollierter Datenpunkte", "pl": "Liczba rejestrowanych stanów" },
+                "name": {
+                    "en": "Number of logged states",
+                    "de": "Anzahl protokollierter Datenpunkte",
+                    "pl": "Liczba rejestrowanych stanów"
+                },
                 "type": "number",
                 "read": true,
                 "write": false,
@@ -344,7 +392,11 @@
             "type": "state",
             "common": {
                 "role": "json",
-                "name": { "en": "Mapping conflicts (JSON)", "de": "Zuordnungskonflikte (JSON)", "pl": "Konflikty mapowania (JSON)" },
+                "name": {
+                    "en": "Mapping conflicts (JSON)",
+                    "de": "Zuordnungskonflikte (JSON)",
+                    "pl": "Konflikty mapowania (JSON)"
+                },
                 "type": "string",
                 "read": true,
                 "write": false,

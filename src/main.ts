@@ -1059,8 +1059,11 @@ export class InfluxV3Adapter extends utils.Adapter {
                     return await this.handleTestConnection(msg);
                 case 'getAdapterStats':
                     return this.reply(msg, this.adapterStats());
-                case 'diagnostics':
-                    return this.reply(msg, { text: this.diagnosticsText() });
+                case 'diagnostics': {
+                    // `text` for textSendTo, `result` for the sendTo button
+                    const text = this.diagnosticsText();
+                    return this.reply(msg, { text, result: text });
+                }
                 case 'previewMapping':
                     return await this.handlePreview(msg);
                 case 'createDatabase':

@@ -1,0 +1,404 @@
+{
+    "i18n": true,
+    "type": "tabs",
+    "items": {
+        "ctBasic": {
+            "type": "panel",
+            "label": "ctab_basic",
+            "items": {
+                "table": {
+                    "type": "text",
+                    "label": "Table (empty = automatic)",
+                    "tooltip": "tip_Table (empty = automatic)",
+                    "help": "tip_Table (empty = automatic)",
+                    "placeholder": "heating",
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 6,
+                    "maxLength": 255,
+                    "default": "",
+                    "validator": "!(data.table || '').startsWith('_')",
+                    "validatorErrorText": "err_table",
+                    "validatorNoSaveOnError": true
+                },
+                "storeAs": {
+                    "type": "select",
+                    "label": "Store as",
+                    "tooltip": "tip_Store as",
+                    "help": "tip_Store as",
+                    "options": [
+                        {
+                            "value": "",
+                            "label": "opt_Automatic"
+                        },
+                        {
+                            "value": "number",
+                            "label": "opt_Number"
+                        },
+                        {
+                            "value": "boolean",
+                            "label": "opt_Boolean"
+                        },
+                        {
+                            "value": "string",
+                            "label": "opt_Text"
+                        }
+                    ],
+                    "default": "",
+                    "sm": 12,
+                    "md": 6
+                },
+                "customTags": {
+                    "type": "table",
+                    "newLine": true,
+                    "sm": 12,
+                    "default": [],
+                    "uniqueColumns": [
+                        "key"
+                    ],
+                    "label": "Tags of this state",
+                    "help": "tip_Tags of this state",
+                    "items": [
+                        {
+                            "type": "text",
+                            "attr": "key",
+                            "width": "40%",
+                            "default": "",
+                            "title": "Tag key",
+                            "placeholder": "location",
+                            "validator": "!(data.key || '').trim() || (!['time','state_id','value','ack','q','from'].includes((data.key || '').trim().toLowerCase()) && !(data.key || '').trim().startsWith('_'))",
+                            "validatorErrorText": "err_tagkey",
+                            "validatorNoSaveOnError": true
+                        },
+                        {
+                            "type": "text",
+                            "attr": "value",
+                            "width": "60%",
+                            "default": "",
+                            "title": "Tag value",
+                            "placeholder": "KOTLOWNIA",
+                            "validator": "!(data.key || '').trim() || !!(data.value || '').trim()",
+                            "validatorErrorText": "err_tagvalue",
+                            "validatorNoSaveOnError": true
+                        }
+                    ]
+                },
+                "changesOnly": {
+                    "type": "checkbox",
+                    "label": "Log changes only",
+                    "tooltip": "tip_Log changes only",
+                    "help": "tip_Log changes only",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4,
+                    "defaultFunc": "instanceObj.native.changesOnly"
+                },
+                "debounceTime": {
+                    "type": "number",
+                    "label": "Debounce (ms)",
+                    "tooltip": "tip_Debounce (ms)",
+                    "help": "tip_Debounce (ms)",
+                    "min": 0,
+                    "max": 86400000,
+                    "placeholder": "0",
+                    "sm": 6,
+                    "md": 4,
+                    "defaultFunc": "instanceObj.native.debounceTime"
+                },
+                "changesRelogInterval": {
+                    "type": "number",
+                    "label": "Re-log unchanged value (s)",
+                    "tooltip": "tip_Re-log unchanged value (s)",
+                    "help": "tip_Re-log unchanged value (s)",
+                    "min": 0,
+                    "max": 2147483,
+                    "placeholder": "0",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4,
+                    "defaultFunc": "instanceObj.native.changesRelogInterval",
+                    "disabled": "!data.changesOnly"
+                },
+                "changesMinDelta": {
+                    "type": "number",
+                    "label": "Minimal change (numbers)",
+                    "tooltip": "tip_Minimal change (numbers)",
+                    "help": "tip_Minimal change (numbers)",
+                    "min": 0,
+                    "step": 0.001,
+                    "placeholder": "0",
+                    "sm": 6,
+                    "md": 4,
+                    "defaultFunc": "customObj && customObj.common && customObj.common.type === 'number' ? instanceObj.native.changesMinDelta : 0",
+                    "disabled": "!data.changesOnly",
+                    "hidden": "!(customObj && customObj.common && customObj.common.type === 'number')"
+                },
+                "_preview": {
+                    "type": "textSendTo",
+                    "container": "text",
+                    "command": "previewMapping",
+                    "newLine": true,
+                    "sm": 12,
+                    "label": "Preview of the record (not saved)",
+                    "jsonData": "{\"id\": ${JSON.stringify(customObj && customObj._id || '')}, \"config\": ${JSON.stringify(data)}}",
+                    "alsoDependsOn": [
+                        "table",
+                        "storeAs",
+                        "customTags",
+                        "useGlobalTags",
+                        "useAutoTags",
+                        "excludeTags",
+                        "aliasId",
+                        "field",
+                        "storeAck",
+                        "storeQ",
+                        "storeFrom",
+                        "round",
+                        "allowSensitiveTags"
+                    ],
+                    "hidden": "!_alive"
+                }
+            }
+        },
+        "ctFilters": {
+            "type": "panel",
+            "label": "ctab_filters",
+            "items": {
+                "blockTime": {
+                    "type": "number",
+                    "label": "Block time (ms)",
+                    "tooltip": "tip_Block time (ms)",
+                    "help": "tip_Block time (ms)",
+                    "min": 0,
+                    "max": 86400000,
+                    "placeholder": "0",
+                    "sm": 6,
+                    "md": 4,
+                    "defaultFunc": "instanceObj.native.blockTime"
+                },
+                "ackFilter": {
+                    "type": "select",
+                    "label": "Filter by ack",
+                    "tooltip": "tip_Filter by ack",
+                    "help": "tip_Filter by ack",
+                    "options": [
+                        {
+                            "value": "all",
+                            "label": "opt_All values"
+                        },
+                        {
+                            "value": "ackOnly",
+                            "label": "opt_Only confirmed (ack=true)"
+                        },
+                        {
+                            "value": "notAckOnly",
+                            "label": "opt_Only commands (ack=false)"
+                        }
+                    ],
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4,
+                    "defaultFunc": "instanceObj.native.ackFilter"
+                },
+                "qFilter": {
+                    "type": "select",
+                    "label": "Filter by quality",
+                    "tooltip": "tip_Filter by quality",
+                    "help": "tip_Filter by quality",
+                    "options": [
+                        {
+                            "value": "all",
+                            "label": "opt_All values"
+                        },
+                        {
+                            "value": "goodOnly",
+                            "label": "opt_Only good quality (q=0)"
+                        }
+                    ],
+                    "sm": 6,
+                    "md": 4,
+                    "defaultFunc": "instanceObj.native.qFilter"
+                },
+                "ignoreZero": {
+                    "type": "checkbox",
+                    "label": "Ignore zero",
+                    "tooltip": "tip_Ignore zero",
+                    "help": "tip_Ignore zero",
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 4,
+                    "default": false,
+                    "hidden": "!(customObj && customObj.common && customObj.common.type === 'number')"
+                },
+                "ignoreBelowNumber": {
+                    "type": "text",
+                    "label": "Ignore values below",
+                    "tooltip": "tip_Ignore values below",
+                    "help": "tip_Ignore values below",
+                    "sm": 6,
+                    "md": 4,
+                    "default": "",
+                    "placeholder": "",
+                    "hidden": "!(customObj && customObj.common && customObj.common.type === 'number')",
+                    "validator": "String(data.ignoreBelowNumber ?? '') === '' || isFinite(data.ignoreBelowNumber)",
+                    "validatorErrorText": "err_number_or_empty",
+                    "validatorNoSaveOnError": true
+                },
+                "ignoreAboveNumber": {
+                    "type": "text",
+                    "label": "Ignore values above",
+                    "tooltip": "tip_Ignore values above",
+                    "help": "tip_Ignore values above",
+                    "sm": 6,
+                    "md": 4,
+                    "default": "",
+                    "placeholder": "",
+                    "hidden": "!(customObj && customObj.common && customObj.common.type === 'number')",
+                    "validator": "String(data.ignoreAboveNumber ?? '') === '' || isFinite(data.ignoreAboveNumber)",
+                    "validatorErrorText": "err_number_or_empty",
+                    "validatorNoSaveOnError": true
+                },
+                "round": {
+                    "type": "text",
+                    "label": "Round to decimal places",
+                    "tooltip": "tip_Round to decimal places",
+                    "help": "tip_Round to decimal places",
+                    "placeholder": "",
+                    "sm": 6,
+                    "md": 4,
+                    "validator": "(data.round === undefined || data.round === null || String(data.round) === '') || /^(1[0-5]|[0-9])$/.test(String(data.round))",
+                    "validatorErrorText": "err_round",
+                    "validatorNoSaveOnError": true,
+                    "defaultFunc": "instanceObj.native.round",
+                    "hidden": "!(customObj && customObj.common && customObj.common.type === 'number') && data.storeAs !== 'number'"
+                },
+                "storeOnStart": {
+                    "type": "checkbox",
+                    "label": "Write current value on start",
+                    "tooltip": "tip_Write current value on start",
+                    "help": "tip_Write current value on start",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4,
+                    "defaultFunc": "instanceObj.native.storeOnStart"
+                },
+                "logSkippedBeforeChange": {
+                    "type": "checkbox",
+                    "label": "Write last skipped value before a change",
+                    "tooltip": "tip_Write last skipped value before a change",
+                    "help": "tip_Write last skipped value before a change",
+                    "sm": 6,
+                    "md": 4,
+                    "defaultFunc": "instanceObj.native.logSkippedBeforeChange"
+                }
+            }
+        },
+        "ctTags": {
+            "type": "panel",
+            "label": "ctab_tags",
+            "items": {
+                "useGlobalTags": {
+                    "type": "checkbox",
+                    "label": "Use global tags",
+                    "tooltip": "tip_Use global tags",
+                    "help": "tip_Use global tags",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4,
+                    "default": true
+                },
+                "useAutoTags": {
+                    "type": "checkbox",
+                    "label": "Use automatic tags",
+                    "tooltip": "tip_Use automatic tags",
+                    "help": "tip_Use automatic tags",
+                    "sm": 6,
+                    "md": 4,
+                    "default": true
+                },
+                "excludeTags": {
+                    "type": "text",
+                    "label": "Remove tag keys",
+                    "tooltip": "tip_Remove tag keys",
+                    "help": "tip_Remove tag keys",
+                    "placeholder": "room, unit",
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 6,
+                    "default": ""
+                },
+                "storeAck": {
+                    "type": "checkbox",
+                    "label": "Store ack",
+                    "tooltip": "tip_Store ack",
+                    "help": "tip_Store ack",
+                    "newLine": true,
+                    "sm": 4,
+                    "defaultFunc": "instanceObj.native.storeAck"
+                },
+                "storeQ": {
+                    "type": "checkbox",
+                    "label": "Store q",
+                    "tooltip": "tip_Store q",
+                    "help": "tip_Store q",
+                    "sm": 4,
+                    "defaultFunc": "instanceObj.native.storeQ"
+                },
+                "storeFrom": {
+                    "type": "checkbox",
+                    "label": "Store from",
+                    "tooltip": "tip_Store from",
+                    "help": "tip_Store from",
+                    "sm": 4,
+                    "defaultFunc": "instanceObj.native.storeFrom"
+                },
+                "allowSensitiveTags": {
+                    "type": "checkbox",
+                    "label": "Allow tags that look like secrets",
+                    "tooltip": "tip_Allow tags that look like secrets",
+                    "help": "tip_Allow tags that look like secrets",
+                    "newLine": true,
+                    "sm": 12,
+                    "default": false
+                }
+            }
+        },
+        "ctAdvanced": {
+            "type": "panel",
+            "label": "ctab_advanced",
+            "items": {
+                "aliasId": {
+                    "type": "text",
+                    "label": "Alias ID",
+                    "tooltip": "tip_Alias ID",
+                    "help": "tip_Alias ID",
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 6,
+                    "maxLength": 255,
+                    "default": ""
+                },
+                "field": {
+                    "type": "text",
+                    "label": "Value column (per-state mode)",
+                    "tooltip": "tip_Value column (per-state mode)",
+                    "help": "tip_Value column (per-state mode)",
+                    "sm": 12,
+                    "md": 6,
+                    "default": "",
+                    "placeholder": "value",
+                    "hidden": "instanceObj.native.schemaMode !== 'perState'"
+                },
+                "enableDebugLogs": {
+                    "type": "checkbox",
+                    "label": "Debug logs for this state",
+                    "tooltip": "tip_Debug logs for this state",
+                    "help": "tip_Debug logs for this state",
+                    "newLine": true,
+                    "sm": 12,
+                    "default": false
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,1383 @@
+{
+    "i18n": true,
+    "type": "tabs",
+    "items": {
+        "tabConnection": {
+            "type": "panel",
+            "label": "tab_connection",
+            "items": {
+                "_h1": {
+                    "type": "header",
+                    "text": "hdr_server",
+                    "size": 4,
+                    "newLine": true,
+                    "sm": 12
+                },
+                "edition": {
+                    "type": "select",
+                    "label": "Server edition",
+                    "tooltip": "tip_Server edition",
+                    "help": "tip_Server edition",
+                    "options": [
+                        {
+                            "value": "auto",
+                            "label": "opt_Automatic"
+                        },
+                        {
+                            "value": "core",
+                            "label": "opt_InfluxDB 3 Core"
+                        },
+                        {
+                            "value": "enterprise",
+                            "label": "opt_InfluxDB 3 Enterprise"
+                        },
+                        {
+                            "value": "cloud",
+                            "label": "opt_Cloud (experimental, write only)"
+                        }
+                    ],
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 4
+                },
+                "url": {
+                    "type": "text",
+                    "label": "Server URL",
+                    "tooltip": "tip_Server URL",
+                    "help": "tip_Server URL",
+                    "placeholder": "http://localhost:8181",
+                    "sm": 12,
+                    "md": 8,
+                    "maxLength": 2048,
+                    "validator": "/^https?:\\/\\/[^\\s/]+/.test(data.url || '')",
+                    "validatorErrorText": "err_url",
+                    "validatorNoSaveOnError": true
+                },
+                "database": {
+                    "type": "text",
+                    "label": "Database",
+                    "tooltip": "tip_Database",
+                    "help": "tip_Database",
+                    "placeholder": "iobroker",
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 4,
+                    "maxLength": 64,
+                    "validator": "/^[A-Za-z0-9_-]{1,64}$/.test(data.database || '')",
+                    "validatorErrorText": "err_db",
+                    "validatorNoSaveOnError": true
+                },
+                "token": {
+                    "type": "password",
+                    "label": "API token",
+                    "tooltip": "tip_API token",
+                    "help": "tip_API token",
+                    "sm": 12,
+                    "md": 8,
+                    "visible": true
+                },
+                "tlsRejectUnauthorized": {
+                    "type": "checkbox",
+                    "label": "Verify TLS certificate",
+                    "tooltip": "tip_Verify TLS certificate",
+                    "help": "tip_Verify TLS certificate",
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 4,
+                    "hidden": "!(data.url || '').startsWith('https')"
+                },
+                "tlsCa": {
+                    "type": "text",
+                    "label": "CA certificate (PEM)",
+                    "tooltip": "tip_CA certificate (PEM)",
+                    "help": "tip_CA certificate (PEM)",
+                    "minRows": 3,
+                    "maxRows": 8,
+                    "placeholder": "-----BEGIN CERTIFICATE-----",
+                    "sm": 12,
+                    "md": 8,
+                    "hidden": "!(data.url || '').startsWith('https')"
+                },
+                "requestTimeoutMs": {
+                    "type": "number",
+                    "label": "Request timeout (ms)",
+                    "tooltip": "tip_Request timeout (ms)",
+                    "help": "tip_Request timeout (ms)",
+                    "min": 1000,
+                    "max": 300000,
+                    "step": 1000,
+                    "placeholder": "10000",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4
+                },
+                "pingIntervalSec": {
+                    "type": "number",
+                    "label": "Connection check interval (s)",
+                    "tooltip": "tip_Connection check interval (s)",
+                    "help": "tip_Connection check interval (s)",
+                    "min": 10,
+                    "max": 3600,
+                    "placeholder": "60",
+                    "sm": 6,
+                    "md": 4
+                },
+                "_test": {
+                    "type": "sendTo",
+                    "label": "Check connection",
+                    "command": "testConnection",
+                    "showProcess": true,
+                    "variant": "contained",
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 4,
+                    "jsonData": "{\"config\": {\"url\": \"${data.url}\", \"database\": \"${data.database}\", \"token\": \"${data.token}\", \"edition\": \"${data.edition}\", \"tlsRejectUnauthorized\": ${data.tlsRejectUnauthorized}, \"requestTimeoutMs\": ${data.requestTimeoutMs}}}",
+                    "timeout": 30000,
+                    "tooltip": "tip_Check connection"
+                },
+                "_noProxy": {
+                    "type": "staticText",
+                    "text": "txt_proxy",
+                    "newLine": true,
+                    "sm": 12
+                },
+                "_h2": {
+                    "type": "header",
+                    "text": "hdr_createdb",
+                    "size": 5,
+                    "newLine": true,
+                    "sm": 12
+                },
+                "createDatabaseRetention": {
+                    "type": "text",
+                    "label": "Retention for a new database",
+                    "tooltip": "tip_Retention for a new database",
+                    "help": "tip_Retention for a new database",
+                    "placeholder": "30d",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4,
+                    "validator": "!data.createDatabaseRetention || /^(none|(\\d+(h|d|w|mo|y))+)$/.test(data.createDatabaseRetention)",
+                    "validatorErrorText": "err_retention",
+                    "validatorNoSaveOnError": true
+                },
+                "_create": {
+                    "type": "sendTo",
+                    "label": "Create database now",
+                    "command": "createDatabase",
+                    "showProcess": true,
+                    "variant": "outlined",
+                    "sm": 6,
+                    "md": 4,
+                    "jsonData": "{\"database\": \"${data.database}\", \"retention\": \"${data.createDatabaseRetention}\"}",
+                    "confirm": {
+                        "text": "confirm_createdb",
+                        "title": "Create database now",
+                        "ok": "Create",
+                        "cancel": "Cancel"
+                    },
+                    "hidden": "!_alive"
+                }
+            }
+        },
+        "tabWrite": {
+            "type": "panel",
+            "label": "tab_write",
+            "items": {
+                "writeMode": {
+                    "type": "select",
+                    "label": "Write mode",
+                    "tooltip": "tip_Write mode",
+                    "help": "tip_Write mode",
+                    "options": [
+                        {
+                            "value": "batched",
+                            "label": "opt_Batched"
+                        },
+                        {
+                            "value": "direct",
+                            "label": "opt_Direct"
+                        }
+                    ],
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 4
+                },
+                "flushIntervalMs": {
+                    "type": "number",
+                    "label": "Flush interval (ms)",
+                    "tooltip": "tip_Flush interval (ms)",
+                    "help": "tip_Flush interval (ms)",
+                    "min": 100,
+                    "max": 600000,
+                    "step": 100,
+                    "placeholder": "2000",
+                    "sm": 6,
+                    "md": 4,
+                    "hidden": "data.writeMode === 'direct'"
+                },
+                "batchMaxLines": {
+                    "type": "number",
+                    "label": "Max. records per batch",
+                    "tooltip": "tip_Max. records per batch",
+                    "help": "tip_Max. records per batch",
+                    "min": 1,
+                    "max": 100000,
+                    "placeholder": "5000",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4,
+                    "hidden": "data.writeMode === 'direct'"
+                },
+                "batchMaxBytes": {
+                    "type": "number",
+                    "label": "Max. batch size (bytes)",
+                    "tooltip": "tip_Max. batch size (bytes)",
+                    "help": "tip_Max. batch size (bytes)",
+                    "min": 4096,
+                    "max": 8388608,
+                    "placeholder": "1048576",
+                    "sm": 6,
+                    "md": 4,
+                    "hidden": "data.writeMode === 'direct'"
+                },
+                "gzip": {
+                    "type": "checkbox",
+                    "label": "Compress requests (gzip)",
+                    "tooltip": "tip_Compress requests (gzip)",
+                    "help": "tip_Compress requests (gzip)",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4
+                },
+                "noSync": {
+                    "type": "checkbox",
+                    "label": "Fast acknowledgement (no_sync)",
+                    "tooltip": "tip_Fast acknowledgement (no_sync)",
+                    "help": "tip_Fast acknowledgement (no_sync)",
+                    "sm": 6,
+                    "md": 4,
+                    "hidden": "data.edition === 'cloud'"
+                },
+                "maxConcurrentWrites": {
+                    "type": "number",
+                    "label": "Parallel write requests",
+                    "tooltip": "tip_Parallel write requests",
+                    "help": "tip_Parallel write requests",
+                    "min": 1,
+                    "max": 8,
+                    "placeholder": "1",
+                    "sm": 6,
+                    "md": 4
+                },
+                "_h1": {
+                    "type": "header",
+                    "text": "hdr_retry",
+                    "size": 5,
+                    "newLine": true,
+                    "sm": 12
+                },
+                "retryBaseDelayMs": {
+                    "type": "number",
+                    "label": "First retry delay (ms)",
+                    "tooltip": "tip_First retry delay (ms)",
+                    "help": "tip_First retry delay (ms)",
+                    "min": 100,
+                    "max": 60000,
+                    "placeholder": "1000",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4
+                },
+                "retryMaxDelayMs": {
+                    "type": "number",
+                    "label": "Max. retry delay (ms)",
+                    "tooltip": "tip_Max. retry delay (ms)",
+                    "help": "tip_Max. retry delay (ms)",
+                    "min": 1000,
+                    "max": 3600000,
+                    "placeholder": "60000",
+                    "sm": 6,
+                    "md": 4
+                },
+                "authRetryMs": {
+                    "type": "number",
+                    "label": "Retry after authentication error (ms)",
+                    "tooltip": "tip_Retry after authentication error (ms)",
+                    "help": "tip_Retry after authentication error (ms)",
+                    "min": 10000,
+                    "max": 86400000,
+                    "placeholder": "300000",
+                    "sm": 6,
+                    "md": 4
+                },
+                "_ms": {
+                    "type": "staticText",
+                    "text": "txt_precision",
+                    "newLine": true,
+                    "sm": 12
+                }
+            }
+        },
+        "tabBuffer": {
+            "type": "panel",
+            "label": "tab_buffer",
+            "items": {
+                "bufferMode": {
+                    "type": "select",
+                    "label": "Buffer mode",
+                    "tooltip": "tip_Buffer mode",
+                    "help": "tip_Buffer mode",
+                    "options": [
+                        {
+                            "value": "memory",
+                            "label": "opt_Memory"
+                        },
+                        {
+                            "value": "disk",
+                            "label": "opt_Disk (persistent)"
+                        }
+                    ],
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 4
+                },
+                "bufferMaxRecords": {
+                    "type": "number",
+                    "label": "Max. records in memory",
+                    "tooltip": "tip_Max. records in memory",
+                    "help": "tip_Max. records in memory",
+                    "min": 1000,
+                    "max": 10000000,
+                    "placeholder": "200000",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4
+                },
+                "bufferMaxBytes": {
+                    "type": "number",
+                    "label": "Max. memory buffer (bytes)",
+                    "tooltip": "tip_Max. memory buffer (bytes)",
+                    "help": "tip_Max. memory buffer (bytes)",
+                    "min": 1048576,
+                    "max": 1073741824,
+                    "placeholder": "33554432",
+                    "sm": 6,
+                    "md": 4
+                },
+                "spoolMaxBytes": {
+                    "type": "number",
+                    "label": "Max. disk buffer (bytes)",
+                    "tooltip": "tip_Max. disk buffer (bytes)",
+                    "help": "tip_Max. disk buffer (bytes)",
+                    "min": 1048576,
+                    "max": 53687091200,
+                    "placeholder": "268435456",
+                    "sm": 6,
+                    "md": 4
+                },
+                "bufferMaxAgeHours": {
+                    "type": "number",
+                    "label": "Max. age of buffered data (h)",
+                    "tooltip": "tip_Max. age of buffered data (h)",
+                    "help": "tip_Max. age of buffered data (h)",
+                    "min": 1,
+                    "max": 8760,
+                    "placeholder": "168",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4
+                },
+                "overflowPolicy": {
+                    "type": "select",
+                    "label": "When the buffer is full",
+                    "tooltip": "tip_When the buffer is full",
+                    "help": "tip_When the buffer is full",
+                    "options": [
+                        {
+                            "value": "dropOldest",
+                            "label": "opt_Drop oldest"
+                        },
+                        {
+                            "value": "dropNewest",
+                            "label": "opt_Drop newest"
+                        }
+                    ],
+                    "sm": 6,
+                    "md": 4
+                },
+                "persistOnShutdown": {
+                    "type": "checkbox",
+                    "label": "Save memory buffer on shutdown",
+                    "tooltip": "tip_Save memory buffer on shutdown",
+                    "help": "tip_Save memory buffer on shutdown",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4,
+                    "hidden": "data.bufferMode === 'disk'"
+                },
+                "spoolFsync": {
+                    "type": "checkbox",
+                    "label": "fsync disk buffer files",
+                    "tooltip": "tip_fsync disk buffer files",
+                    "help": "tip_fsync disk buffer files",
+                    "sm": 6,
+                    "md": 4
+                },
+                "shutdownFlushTimeoutMs": {
+                    "type": "number",
+                    "label": "Max. send time on shutdown (ms)",
+                    "tooltip": "tip_Max. send time on shutdown (ms)",
+                    "help": "tip_Max. send time on shutdown (ms)",
+                    "min": 500,
+                    "max": 8000,
+                    "placeholder": "5000",
+                    "sm": 6,
+                    "md": 4
+                },
+                "_g": {
+                    "type": "staticText",
+                    "text": "txt_guarantee",
+                    "newLine": true,
+                    "sm": 12
+                }
+            }
+        },
+        "tabSchema": {
+            "type": "panel",
+            "label": "tab_schema",
+            "items": {
+                "schemaMode": {
+                    "type": "select",
+                    "label": "Table model",
+                    "tooltip": "tip_Table model",
+                    "help": "tip_Table model",
+                    "options": [
+                        {
+                            "value": "grouped",
+                            "label": "opt_Grouped (recommended)"
+                        },
+                        {
+                            "value": "perState",
+                            "label": "opt_One table per state"
+                        }
+                    ],
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 6
+                },
+                "_ps": {
+                    "type": "staticText",
+                    "text": "txt_perstate_warn",
+                    "newLine": true,
+                    "sm": 12,
+                    "hidden": "data.schemaMode !== 'perState'",
+                    "style": {
+                        "color": "orange"
+                    }
+                },
+                "tableNumber": {
+                    "type": "text",
+                    "label": "Table for numbers",
+                    "tooltip": "tip_Table for numbers",
+                    "help": "tip_Table for numbers",
+                    "placeholder": "numeric_states",
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 4,
+                    "maxLength": 255,
+                    "hidden": "data.schemaMode === 'perState'"
+                },
+                "tableBoolean": {
+                    "type": "text",
+                    "label": "Table for booleans",
+                    "tooltip": "tip_Table for booleans",
+                    "help": "tip_Table for booleans",
+                    "placeholder": "boolean_states",
+                    "sm": 12,
+                    "md": 4,
+                    "maxLength": 255,
+                    "hidden": "data.schemaMode === 'perState'"
+                },
+                "tableString": {
+                    "type": "text",
+                    "label": "Table for texts",
+                    "tooltip": "tip_Table for texts",
+                    "help": "tip_Table for texts",
+                    "placeholder": "string_states",
+                    "sm": 12,
+                    "md": 4,
+                    "maxLength": 255,
+                    "hidden": "data.schemaMode === 'perState'"
+                },
+                "tableRules": {
+                    "type": "table",
+                    "newLine": true,
+                    "sm": 12,
+                    "label": "Table rules",
+                    "help": "tip_Table rules",
+                    "hidden": "data.schemaMode === 'perState'",
+                    "items": [
+                        {
+                            "type": "select",
+                            "attr": "match",
+                            "width": "15%",
+                            "default": "role",
+                            "title": "Match",
+                            "options": [
+                                {
+                                    "value": "role",
+                                    "label": "opt_Role"
+                                },
+                                {
+                                    "value": "id",
+                                    "label": "opt_ID"
+                                }
+                            ]
+                        },
+                        {
+                            "type": "text",
+                            "attr": "pattern",
+                            "width": "35%",
+                            "default": "",
+                            "title": "Pattern",
+                            "placeholder": "value.temperature*"
+                        },
+                        {
+                            "type": "select",
+                            "attr": "valueType",
+                            "width": "20%",
+                            "default": "",
+                            "title": "Value types",
+                            "options": [
+                                {
+                                    "value": "",
+                                    "label": "opt_Numbers (default)"
+                                },
+                                {
+                                    "value": "number",
+                                    "label": "opt_Numbers"
+                                },
+                                {
+                                    "value": "boolean",
+                                    "label": "opt_Booleans"
+                                },
+                                {
+                                    "value": "string",
+                                    "label": "opt_Texts"
+                                },
+                                {
+                                    "value": "any",
+                                    "label": "opt_Any (may conflict)"
+                                }
+                            ]
+                        },
+                        {
+                            "type": "text",
+                            "attr": "table",
+                            "width": "30%",
+                            "default": "",
+                            "title": "Table",
+                            "placeholder": "temperature",
+                            "validator": "!(data.table || '').startsWith('_')",
+                            "validatorErrorText": "err_table",
+                            "validatorNoSaveOnError": true
+                        }
+                    ]
+                },
+                "valueField": {
+                    "type": "text",
+                    "label": "Value column",
+                    "tooltip": "tip_Value column",
+                    "help": "tip_Value column",
+                    "placeholder": "value",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4,
+                    "maxLength": 64,
+                    "validator": "/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(data.valueField || '') && !['time','ack','q','from','state_id'].includes(data.valueField)",
+                    "validatorErrorText": "err_field",
+                    "validatorNoSaveOnError": true
+                },
+                "maxTables": {
+                    "type": "number",
+                    "label": "Max. tables",
+                    "tooltip": "tip_Max. tables",
+                    "help": "tip_Max. tables",
+                    "min": 1,
+                    "max": 1000000,
+                    "placeholder": "2000",
+                    "sm": 6,
+                    "md": 4
+                },
+                "maxColumns": {
+                    "type": "number",
+                    "label": "Max. columns per table",
+                    "tooltip": "tip_Max. columns per table",
+                    "help": "tip_Max. columns per table",
+                    "min": 10,
+                    "max": 100000,
+                    "placeholder": "500",
+                    "sm": 6,
+                    "md": 4
+                },
+                "maxStringLength": {
+                    "type": "number",
+                    "label": "Max. text length (bytes)",
+                    "tooltip": "tip_Max. text length (bytes)",
+                    "help": "tip_Max. text length (bytes)",
+                    "min": 16,
+                    "max": 1048560,
+                    "placeholder": "65536",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4
+                },
+                "objectPolicy": {
+                    "type": "select",
+                    "label": "Objects and arrays",
+                    "tooltip": "tip_Objects and arrays",
+                    "help": "tip_Objects and arrays",
+                    "options": [
+                        {
+                            "value": "json",
+                            "label": "opt_Store as JSON text"
+                        },
+                        {
+                            "value": "reject",
+                            "label": "opt_Reject"
+                        }
+                    ],
+                    "sm": 6,
+                    "md": 4
+                },
+                "_h1": {
+                    "type": "header",
+                    "text": "hdr_meta",
+                    "size": 5,
+                    "newLine": true,
+                    "sm": 12
+                },
+                "metaAck": {
+                    "type": "select",
+                    "label": "ack",
+                    "tooltip": "tip_ack",
+                    "help": "tip_ack",
+                    "options": [
+                        {
+                            "value": "field",
+                            "label": "opt_Field"
+                        },
+                        {
+                            "value": "tag",
+                            "label": "opt_Tag"
+                        },
+                        {
+                            "value": "none",
+                            "label": "opt_Not stored"
+                        }
+                    ],
+                    "newLine": true,
+                    "sm": 4
+                },
+                "metaQ": {
+                    "type": "select",
+                    "label": "q (quality)",
+                    "tooltip": "tip_q (quality)",
+                    "help": "tip_q (quality)",
+                    "options": [
+                        {
+                            "value": "field",
+                            "label": "opt_Field"
+                        },
+                        {
+                            "value": "tag",
+                            "label": "opt_Tag"
+                        },
+                        {
+                            "value": "none",
+                            "label": "opt_Not stored"
+                        }
+                    ],
+                    "sm": 4
+                },
+                "metaFrom": {
+                    "type": "select",
+                    "label": "from (source)",
+                    "tooltip": "tip_from (source)",
+                    "help": "tip_from (source)",
+                    "options": [
+                        {
+                            "value": "none",
+                            "label": "opt_Not stored"
+                        },
+                        {
+                            "value": "field",
+                            "label": "opt_Field"
+                        },
+                        {
+                            "value": "tag",
+                            "label": "opt_Tag"
+                        }
+                    ],
+                    "sm": 4
+                },
+                "_mw": {
+                    "type": "staticText",
+                    "text": "txt_meta_change",
+                    "newLine": true,
+                    "sm": 12
+                }
+            }
+        },
+        "tabTags": {
+            "type": "panel",
+            "label": "tab_tags",
+            "items": {
+                "globalTags": {
+                    "type": "table",
+                    "newLine": true,
+                    "sm": 12,
+                    "label": "Global tags",
+                    "help": "tip_Global tags",
+                    "uniqueColumns": [
+                        "key"
+                    ],
+                    "items": [
+                        {
+                            "type": "text",
+                            "attr": "key",
+                            "width": "40%",
+                            "default": "",
+                            "title": "Tag key",
+                            "placeholder": "location",
+                            "validator": "!(data.key || '').trim() || (!['time','state_id','value','ack','q','from'].includes((data.key || '').trim().toLowerCase()) && !(data.key || '').trim().startsWith('_'))",
+                            "validatorErrorText": "err_tagkey",
+                            "validatorNoSaveOnError": true
+                        },
+                        {
+                            "type": "text",
+                            "attr": "value",
+                            "width": "60%",
+                            "default": "",
+                            "title": "Tag value",
+                            "placeholder": "KOTLOWNIA",
+                            "validator": "!(data.key || '').trim() || !!(data.value || '').trim()",
+                            "validatorErrorText": "err_tagvalue",
+                            "validatorNoSaveOnError": true
+                        }
+                    ]
+                },
+                "tagKeyStyle": {
+                    "type": "select",
+                    "label": "Tag key style",
+                    "tooltip": "tip_Tag key style",
+                    "help": "tip_Tag key style",
+                    "options": [
+                        {
+                            "value": "snake",
+                            "label": "opt_lower_snake_case (recommended)"
+                        },
+                        {
+                            "value": "preserve",
+                            "label": "opt_Keep as entered"
+                        }
+                    ],
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 6
+                },
+                "_h1": {
+                    "type": "header",
+                    "text": "hdr_auto",
+                    "size": 5,
+                    "newLine": true,
+                    "sm": 12
+                },
+                "autoTagRoom": {
+                    "type": "checkbox",
+                    "label": "room (enum.rooms)",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4
+                },
+                "autoTagFunction": {
+                    "type": "checkbox",
+                    "label": "function (enum.functions)",
+                    "sm": 6,
+                    "md": 4
+                },
+                "autoTagAdapter": {
+                    "type": "checkbox",
+                    "label": "adapter (e.g. hm-rpc)",
+                    "sm": 6,
+                    "md": 4
+                },
+                "autoTagInstance": {
+                    "type": "checkbox",
+                    "label": "instance (e.g. hm-rpc.0)",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4
+                },
+                "autoTagDevice": {
+                    "type": "checkbox",
+                    "label": "device (name of parent device)",
+                    "sm": 6,
+                    "md": 4
+                },
+                "autoTagChannel": {
+                    "type": "checkbox",
+                    "label": "channel (name of parent channel)",
+                    "sm": 6,
+                    "md": 4
+                },
+                "autoTagUnit": {
+                    "type": "checkbox",
+                    "label": "unit (common.unit)",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4
+                },
+                "autoTagRole": {
+                    "type": "checkbox",
+                    "label": "role (common.role)",
+                    "sm": 6,
+                    "md": 4
+                },
+                "autoTagName": {
+                    "type": "checkbox",
+                    "label": "name (common.name)",
+                    "tooltip": "tip_name (common.name)",
+                    "help": "tip_name (common.name)",
+                    "sm": 6,
+                    "md": 4
+                },
+                "nativeAllowlist": {
+                    "type": "text",
+                    "label": "Allowed native keys for templates",
+                    "tooltip": "tip_Allowed native keys for templates",
+                    "help": "tip_Allowed native keys for templates",
+                    "placeholder": "serial, model",
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 6
+                },
+                "_h2": {
+                    "type": "header",
+                    "text": "hdr_tagsafety",
+                    "size": 5,
+                    "newLine": true,
+                    "sm": 12
+                },
+                "maxTagValuesPerKey": {
+                    "type": "number",
+                    "label": "Max. distinct values per tag key",
+                    "tooltip": "tip_Max. distinct values per tag key",
+                    "help": "tip_Max. distinct values per tag key",
+                    "min": 1,
+                    "max": 1000000,
+                    "placeholder": "1000",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4
+                },
+                "maxTagValueLength": {
+                    "type": "number",
+                    "label": "Max. tag value length",
+                    "tooltip": "tip_Max. tag value length",
+                    "help": "tip_Max. tag value length",
+                    "min": 8,
+                    "max": 4096,
+                    "placeholder": "256",
+                    "sm": 6,
+                    "md": 4
+                },
+                "blockSensitiveTags": {
+                    "type": "checkbox",
+                    "label": "Block secrets in tags",
+                    "tooltip": "tip_Block secrets in tags",
+                    "help": "tip_Block secrets in tags",
+                    "sm": 6,
+                    "md": 4
+                },
+                "_h3": {
+                    "type": "header",
+                    "text": "hdr_dynamic",
+                    "size": 5,
+                    "newLine": true,
+                    "sm": 12
+                },
+                "dynamicTagsEnabled": {
+                    "type": "checkbox",
+                    "label": "Enable dynamic tags {state:<id>}",
+                    "tooltip": "tip_Enable dynamic tags {state:<id>}",
+                    "help": "tip_Enable dynamic tags {state:<id>}",
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 4
+                },
+                "dynamicTagTtlSec": {
+                    "type": "number",
+                    "label": "Max. age of a source value (s)",
+                    "tooltip": "tip_Max. age of a source value (s)",
+                    "help": "tip_Max. age of a source value (s)",
+                    "min": 0,
+                    "max": 31536000,
+                    "placeholder": "3600",
+                    "sm": 6,
+                    "md": 4,
+                    "hidden": "!data.dynamicTagsEnabled"
+                },
+                "dynamicTagMaxValues": {
+                    "type": "number",
+                    "label": "Max. distinct values per dynamic tag",
+                    "tooltip": "tip_Max. distinct values per dynamic tag",
+                    "help": "tip_Max. distinct values per dynamic tag",
+                    "min": 1,
+                    "max": 100000,
+                    "placeholder": "100",
+                    "sm": 6,
+                    "md": 4,
+                    "hidden": "!data.dynamicTagsEnabled"
+                },
+                "_tpl": {
+                    "type": "staticText",
+                    "text": "txt_templates",
+                    "newLine": true,
+                    "sm": 12
+                }
+            }
+        },
+        "tabDefaults": {
+            "type": "panel",
+            "label": "tab_defaults",
+            "items": {
+                "_d": {
+                    "type": "staticText",
+                    "text": "txt_defaults",
+                    "newLine": true,
+                    "sm": 12
+                },
+                "changesOnly": {
+                    "type": "checkbox",
+                    "label": "Log changes only",
+                    "tooltip": "tip_Log changes only",
+                    "help": "tip_Log changes only",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4
+                },
+                "debounceTime": {
+                    "type": "number",
+                    "label": "Debounce (ms)",
+                    "tooltip": "tip_Debounce (ms)",
+                    "help": "tip_Debounce (ms)",
+                    "min": 0,
+                    "max": 86400000,
+                    "placeholder": "0",
+                    "sm": 6,
+                    "md": 4
+                },
+                "blockTime": {
+                    "type": "number",
+                    "label": "Block time (ms)",
+                    "tooltip": "tip_Block time (ms)",
+                    "help": "tip_Block time (ms)",
+                    "min": 0,
+                    "max": 86400000,
+                    "placeholder": "0",
+                    "sm": 6,
+                    "md": 4
+                },
+                "changesRelogInterval": {
+                    "type": "number",
+                    "label": "Re-log unchanged value (s)",
+                    "tooltip": "tip_Re-log unchanged value (s)",
+                    "help": "tip_Re-log unchanged value (s)",
+                    "min": 0,
+                    "max": 2147483,
+                    "placeholder": "0",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4
+                },
+                "changesMinDelta": {
+                    "type": "number",
+                    "label": "Minimal change (numbers)",
+                    "tooltip": "tip_Minimal change (numbers)",
+                    "help": "tip_Minimal change (numbers)",
+                    "min": 0,
+                    "step": 0.001,
+                    "placeholder": "0",
+                    "sm": 6,
+                    "md": 4
+                },
+                "round": {
+                    "type": "text",
+                    "label": "Round to decimal places",
+                    "tooltip": "tip_Round to decimal places",
+                    "help": "tip_Round to decimal places",
+                    "placeholder": "",
+                    "sm": 6,
+                    "md": 4,
+                    "validator": "(data.round === undefined || data.round === null || String(data.round) === '') || /^(1[0-5]|[0-9])$/.test(String(data.round))",
+                    "validatorErrorText": "err_round",
+                    "validatorNoSaveOnError": true
+                },
+                "storeOnStart": {
+                    "type": "checkbox",
+                    "label": "Write current value on start",
+                    "tooltip": "tip_Write current value on start",
+                    "help": "tip_Write current value on start",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4
+                },
+                "logSkippedBeforeChange": {
+                    "type": "checkbox",
+                    "label": "Write last skipped value before a change",
+                    "tooltip": "tip_Write last skipped value before a change",
+                    "help": "tip_Write last skipped value before a change",
+                    "sm": 6,
+                    "md": 4
+                },
+                "ackFilter": {
+                    "type": "select",
+                    "label": "Filter by ack",
+                    "tooltip": "tip_Filter by ack",
+                    "help": "tip_Filter by ack",
+                    "options": [
+                        {
+                            "value": "all",
+                            "label": "opt_All values"
+                        },
+                        {
+                            "value": "ackOnly",
+                            "label": "opt_Only confirmed (ack=true)"
+                        },
+                        {
+                            "value": "notAckOnly",
+                            "label": "opt_Only commands (ack=false)"
+                        }
+                    ],
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4
+                },
+                "qFilter": {
+                    "type": "select",
+                    "label": "Filter by quality",
+                    "tooltip": "tip_Filter by quality",
+                    "help": "tip_Filter by quality",
+                    "options": [
+                        {
+                            "value": "all",
+                            "label": "opt_All values"
+                        },
+                        {
+                            "value": "goodOnly",
+                            "label": "opt_Only good quality (q=0)"
+                        }
+                    ],
+                    "sm": 6,
+                    "md": 4
+                },
+                "storeAck": {
+                    "type": "checkbox",
+                    "label": "Store ack",
+                    "tooltip": "tip_Store ack",
+                    "help": "tip_Store ack",
+                    "newLine": true,
+                    "sm": 4
+                },
+                "storeQ": {
+                    "type": "checkbox",
+                    "label": "Store q",
+                    "tooltip": "tip_Store q",
+                    "help": "tip_Store q",
+                    "sm": 4
+                },
+                "storeFrom": {
+                    "type": "checkbox",
+                    "label": "Store from",
+                    "tooltip": "tip_Store from",
+                    "help": "tip_Store from",
+                    "sm": 4
+                }
+            }
+        },
+        "tabHistory": {
+            "type": "panel",
+            "label": "tab_history",
+            "items": {
+                "historyMaxRows": {
+                    "type": "number",
+                    "label": "Default row limit of getHistory",
+                    "tooltip": "tip_Default row limit of getHistory",
+                    "help": "tip_Default row limit of getHistory",
+                    "min": 1,
+                    "max": 1000000,
+                    "placeholder": "2000",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4
+                },
+                "historyHardLimit": {
+                    "type": "number",
+                    "label": "Absolute row limit of getHistory",
+                    "tooltip": "tip_Absolute row limit of getHistory",
+                    "help": "tip_Absolute row limit of getHistory",
+                    "min": 100,
+                    "max": 1000000,
+                    "placeholder": "100000",
+                    "sm": 6,
+                    "md": 4
+                },
+                "defaultAggregate": {
+                    "type": "select",
+                    "label": "Default aggregation",
+                    "tooltip": "tip_Default aggregation",
+                    "help": "tip_Default aggregation",
+                    "options": [
+                        {
+                            "value": "none",
+                            "label": "opt_None (raw values)"
+                        },
+                        {
+                            "value": "average",
+                            "label": "opt_Average"
+                        },
+                        {
+                            "value": "min",
+                            "label": "opt_Minimum"
+                        },
+                        {
+                            "value": "max",
+                            "label": "opt_Maximum"
+                        },
+                        {
+                            "value": "minmax",
+                            "label": "opt_Min and max"
+                        },
+                        {
+                            "value": "total",
+                            "label": "opt_Sum"
+                        },
+                        {
+                            "value": "count",
+                            "label": "opt_Count"
+                        }
+                    ],
+                    "sm": 6,
+                    "md": 4
+                },
+                "queryTimeoutMs": {
+                    "type": "number",
+                    "label": "Query timeout (ms)",
+                    "tooltip": "tip_Query timeout (ms)",
+                    "help": "tip_Query timeout (ms)",
+                    "min": 1000,
+                    "max": 600000,
+                    "placeholder": "30000",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4
+                },
+                "queryMaxRows": {
+                    "type": "number",
+                    "label": "Max. rows of user queries",
+                    "tooltip": "tip_Max. rows of user queries",
+                    "help": "tip_Max. rows of user queries",
+                    "min": 1,
+                    "max": 1000000,
+                    "placeholder": "10000",
+                    "sm": 6,
+                    "md": 4
+                },
+                "queryMaxBytes": {
+                    "type": "number",
+                    "label": "Max. result size (bytes)",
+                    "tooltip": "tip_Max. result size (bytes)",
+                    "help": "tip_Max. result size (bytes)",
+                    "min": 65536,
+                    "max": 536870912,
+                    "placeholder": "10485760",
+                    "sm": 6,
+                    "md": 4
+                },
+                "allowUserQueries": {
+                    "type": "checkbox",
+                    "label": "Allow SQL/InfluxQL queries via sendTo",
+                    "tooltip": "tip_Allow SQL/InfluxQL queries via sendTo",
+                    "help": "tip_Allow SQL/InfluxQL queries via sendTo",
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 4
+                },
+                "querySenders": {
+                    "type": "text",
+                    "label": "Allowed query senders",
+                    "tooltip": "tip_Allowed query senders",
+                    "help": "tip_Allowed query senders",
+                    "placeholder": "admin, javascript.0",
+                    "sm": 12,
+                    "md": 8,
+                    "hidden": "!data.allowUserQueries"
+                }
+            }
+        },
+        "tabAdvanced": {
+            "type": "panel",
+            "label": "tab_advanced",
+            "items": {
+                "subscribeAllThreshold": {
+                    "type": "number",
+                    "label": "Subscribe to all states from",
+                    "tooltip": "tip_Subscribe to all states from",
+                    "help": "tip_Subscribe to all states from",
+                    "min": 1,
+                    "max": 100000,
+                    "placeholder": "20",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4
+                },
+                "logRejectedLimitPerMin": {
+                    "type": "number",
+                    "label": "Logged rejections per minute",
+                    "tooltip": "tip_Logged rejections per minute",
+                    "help": "tip_Logged rejections per minute",
+                    "min": 0,
+                    "max": 10000,
+                    "placeholder": "10",
+                    "sm": 6,
+                    "md": 4
+                },
+                "statsIntervalSec": {
+                    "type": "number",
+                    "label": "Statistics update interval (s)",
+                    "tooltip": "tip_Statistics update interval (s)",
+                    "help": "tip_Statistics update interval (s)",
+                    "min": 2,
+                    "max": 3600,
+                    "placeholder": "10",
+                    "sm": 6,
+                    "md": 4
+                },
+                "writeStatsToInflux": {
+                    "type": "checkbox",
+                    "label": "Write adapter statistics into InfluxDB (experimental)",
+                    "tooltip": "tip_Write adapter statistics into InfluxDB (experimental)",
+                    "help": "tip_Write adapter statistics into InfluxDB (experimental)",
+                    "newLine": true,
+                    "sm": 12
+                }
+            }
+        },
+        "tabDiagnostics": {
+            "type": "panel",
+            "label": "tab_diagnostics",
+            "items": {
+                "_diag": {
+                    "type": "textSendTo",
+                    "container": "text",
+                    "command": "diagnostics",
+                    "copyToClipboard": true,
+                    "newLine": true,
+                    "sm": 12,
+                    "label": "Diagnostics",
+                    "hidden": "!_alive"
+                },
+                "_refresh": {
+                    "type": "sendTo",
+                    "command": "diagnostics",
+                    "label": "Show current status",
+                    "variant": "outlined",
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 4,
+                    "hidden": "!_alive"
+                },
+                "_flush": {
+                    "type": "sendTo",
+                    "command": "flushBuffer",
+                    "label": "Send buffer now",
+                    "variant": "outlined",
+                    "showProcess": true,
+                    "sm": 6,
+                    "md": 4,
+                    "hidden": "!_alive"
+                },
+                "_notalive": {
+                    "type": "staticText",
+                    "text": "txt_notalive",
+                    "newLine": true,
+                    "sm": 12,
+                    "hidden": "_alive"
+                }
+            }
+        },
+        "tabMigration": {
+            "type": "panel",
+            "label": "tab_migration",
+            "items": {
+                "_mi": {
+                    "type": "staticText",
+                    "text": "txt_migration",
+                    "newLine": true,
+                    "sm": 12
+                },
+                "migrationSource": {
+                    "type": "selectSendTo",
+                    "label": "Source influxdb instance",
+                    "tooltip": "tip_Source influxdb instance",
+                    "help": "tip_Source influxdb instance",
+                    "command": "listInfluxdbInstances",
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 4,
+                    "hidden": "!_alive"
+                },
+                "migrationOverwrite": {
+                    "type": "checkbox",
+                    "label": "Overwrite existing settings of this instance",
+                    "tooltip": "tip_Overwrite existing settings of this instance",
+                    "help": "tip_Overwrite existing settings of this instance",
+                    "sm": 12,
+                    "md": 4,
+                    "hidden": "!_alive"
+                },
+                "_preview": {
+                    "type": "sendTo",
+                    "command": "migrationPreview",
+                    "label": "Preview",
+                    "variant": "outlined",
+                    "showProcess": true,
+                    "newLine": true,
+                    "sm": 6,
+                    "md": 3,
+                    "hidden": "!_alive || !data.migrationSource",
+                    "jsonData": "{\"source\": \"${data.migrationSource}\", \"overwrite\": ${!!data.migrationOverwrite}}"
+                },
+                "_apply": {
+                    "type": "sendTo",
+                    "command": "migrationApply",
+                    "label": "Apply",
+                    "variant": "contained",
+                    "showProcess": true,
+                    "sm": 6,
+                    "md": 3,
+                    "hidden": "!_alive || !data.migrationSource",
+                    "jsonData": "{\"source\": \"${data.migrationSource}\", \"overwrite\": ${!!data.migrationOverwrite}}",
+                    "confirm": {
+                        "text": "confirm_migration",
+                        "title": "Apply",
+                        "ok": "Apply",
+                        "cancel": "Cancel"
+                    }
+                }
+            }
+        }
+    }
+}
