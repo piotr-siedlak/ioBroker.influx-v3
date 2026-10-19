@@ -1,0 +1,29 @@
+{
+    "common": {
+        "custom": {
+            "influx_v3.0": {
+                "enabled": true,
+                "table": "heating",
+                "storeAs": "",
+                "customTags": [
+                    { "key": "Location", "value": "KOTLOWNIA" },
+                    { "key": "Device", "value": "PC" },
+                    { "key": "Sub-Type", "value": "HC1" },
+                    { "key": "circuit", "value": "{id.segment[2]}" }
+                ],
+                "useGlobalTags": true,
+                "useAutoTags": true,
+                "excludeTags": "",
+                "changesOnly": true,
+                "debounceTime": 0,
+                "blockTime": 0,
+                "changesRelogInterval": 3600,
+                "changesMinDelta": 0.1,
+                "round": 1,
+                "storeAck": true,
+                "storeQ": true,
+                "storeFrom": false
+            }
+        }
+    }
+}

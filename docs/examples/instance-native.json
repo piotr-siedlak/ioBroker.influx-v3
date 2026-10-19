@@ -1,0 +1,24 @@
+{
+    "edition": "auto",
+    "url": "http://192.168.1.10:8181",
+    "database": "iobroker",
+    "token": "<stored encrypted by Admin>",
+    "writeMode": "batched",
+    "flushIntervalMs": 2000,
+    "bufferMode": "disk",
+    "schemaMode": "grouped",
+    "tableRules": [
+        { "match": "role", "pattern": "value.temperature*", "valueType": "", "table": "temperature" },
+        { "match": "role", "pattern": "value.power*", "valueType": "", "table": "energy" },
+        { "match": "id", "pattern": "heat.0.*", "valueType": "", "table": "heating" }
+    ],
+    "globalTags": [{ "key": "site", "value": "home" }],
+    "tagKeyStyle": "snake",
+    "autoTagRoom": true,
+    "autoTagFunction": true,
+    "autoTagUnit": true,
+    "autoTagAdapter": true,
+    "metaAck": "field",
+    "metaQ": "field",
+    "metaFrom": "none"
+}

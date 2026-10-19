@@ -1349,6 +1349,7 @@ export class InfluxV3Adapter extends utils.Adapter {
             `Connected: ${st.connected ? 'yes' : 'no'}`,
             `Server: ${st.serverEdition || '-'} ${st.serverVersion}`,
             `Logged states: ${this.registry.size} (conflicts: ${[...this.registry.values()].filter(r => r.conflict).length})`,
+            `Tables: ${this.schema?.tableCount() ?? 0} of max. ${this.cfg.maxTables} (${this.cfg.schemaMode} mode)`,
             `Written / rejected / dropped: ${c.written} / ${c.rejected} / ${c.dropped}`,
             `Buffer: ${q?.queuedRecords ?? 0} records, disk ${q?.spoolBytes ?? 0} B, circuit ${q?.circuit ?? '-'}`,
             `Last write: ${fmt(st.lastWrite)}  Last read: ${fmt(st.lastRead)}`,

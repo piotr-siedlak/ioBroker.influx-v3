@@ -164,13 +164,23 @@ Decision (ADR-0003): use a **small own HTTP client** built on `node:http`/`node:
 
 | Candidate | npm | ioBroker repo | Note |
 | --- | --- | --- | --- |
-| `influx_v3` (`iobroker.influx_v3`) | free (E404) | not listed | allowed characters (`[a-z0-9_-]`, checker `E0006`); clearly distinct from `influxdb`; **chosen** |
+| `influx_v3` (`iobroker.influx_v3`) | free (E404) | not listed | allowed characters (`[a-z0-9_-]`, checker `E0006`); clearly distinct from `influxdb`; **working name used in this code base** — but see the publication blocker below |
+| `influx-v3` (`iobroker.influx-v3`) | free (E404) | not listed | **recommended name for publication** (see below) |
 | `influxdb3` | free | — | visually too close to `influxdb`, risk of confusion in admin lists |
 | `influx3`, `influxv3`, `influxdb-v3` | free | — | no advantage |
 
 Instance objects live under `influx_v3.N.*`; custom config under `common.custom["influx_v3.N"]`; the
 data directory is `iobroker-data/influx_v3.N/`. Nothing overlaps with `influxdb.N`.
 UI product name: **InfluxDB 3**.
+
+**Publication blocker found while running the repository checker (v5.23.2, `lib/M4000_Repository.js`):**
+for every adapter that is not yet in the ioBroker repository the checker raises
+`[E4021] Adapter name should use "-" instead of "_"`. The working name `influx_v3` therefore cannot be added to
+the official repository. The master prompt asks to describe such a decision before renaming, so the code still
+uses `influx_v3`. Recommended for publication: adapter `influx-v3`, npm package `iobroker.influx-v3`, GitHub
+repository `ioBroker.influx-v3` (also fixes `E0002`/`E0003`). The rename touches `package.json`, `io-package.json`
+(`common.name`, URLs), the adapter name in `src/main.ts`, admin texts mentioning `influx_v3.N`, docs and tests; it
+must happen **before** the first public installation, because instance ids and `common.custom` keys change with it.
 
 ## 9. Risks
 
