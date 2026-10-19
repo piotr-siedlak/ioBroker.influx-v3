@@ -1,0 +1,6 @@
+{
+    "require": ["tsx/cjs", "./test/mocha.setup.js"],
+    "extension": ["ts", "js"],
+    "timeout": 10000,
+    "exit": true
+}

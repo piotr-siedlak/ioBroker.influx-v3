@@ -1,0 +1,10 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "noEmit": false,
+        "rootDir": "./src",
+        "declaration": false,
+        "types": ["node", "@iobroker/types"]
+    },
+    "include": ["src/**/*.ts"]
+}

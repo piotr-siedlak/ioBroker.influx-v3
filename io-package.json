@@ -1,0 +1,356 @@
+{
+    "common": {
+        "name": "influx_v3",
+        "version": "0.1.0",
+        "news": {
+            "0.1.0": {
+                "en": "Initial release: per-state logging to InfluxDB 3 Core/Enterprise, grouped and per-state tables, layered tags, disk buffer, SQL history",
+                "de": "Erste Version: Protokollierung einzelner Datenpunkte in InfluxDB 3 Core/Enterprise, gruppierte und Einzel-Tabellen, mehrstufige Tags, Festplattenpuffer, SQL-Historie",
+                "ru": "Первый выпуск: запись отдельных состояний в InfluxDB 3 Core/Enterprise, групповые и отдельные таблицы, многоуровневые теги, дисковый буфер, история через SQL",
+                "pt": "Versão inicial: registo por estado no InfluxDB 3 Core/Enterprise, tabelas agrupadas e por estado, etiquetas em camadas, buffer em disco, histórico SQL",
+                "nl": "Eerste versie: logging per datapunt naar InfluxDB 3 Core/Enterprise, gegroepeerde en aparte tabellen, gelaagde tags, schijfbuffer, SQL-historie",
+                "fr": "Version initiale : journalisation par état dans InfluxDB 3 Core/Enterprise, tables groupées et par état, tags hiérarchisés, tampon disque, historique SQL",
+                "it": "Prima versione: registrazione per stato in InfluxDB 3 Core/Enterprise, tabelle raggruppate e per stato, tag a livelli, buffer su disco, cronologia SQL",
+                "es": "Versión inicial: registro por estado en InfluxDB 3 Core/Enterprise, tablas agrupadas y por estado, etiquetas por capas, búfer en disco, historial SQL",
+                "pl": "Pierwsze wydanie: zapis wybranych stanów do InfluxDB 3 Core/Enterprise, tabele grupowe i per-stan, wielowarstwowe tagi, bufor dyskowy, historia przez SQL",
+                "uk": "Перший випуск: запис окремих станів у InfluxDB 3 Core/Enterprise, групові та окремі таблиці, багаторівневі теги, дисковий буфер, історія через SQL",
+                "zh-cn": "首个版本：按状态记录到 InfluxDB 3 Core/Enterprise，分组表和单状态表，分层标签，磁盘缓冲，SQL 历史"
+            }
+        },
+        "titleLang": {
+            "en": "InfluxDB 3 logging",
+            "de": "InfluxDB 3 Protokollierung",
+            "ru": "Запись в InfluxDB 3",
+            "pt": "Registo InfluxDB 3",
+            "nl": "InfluxDB 3 logging",
+            "fr": "Journalisation InfluxDB 3",
+            "it": "Registrazione InfluxDB 3",
+            "es": "Registro InfluxDB 3",
+            "pl": "Zapis do InfluxDB 3",
+            "uk": "Запис в InfluxDB 3",
+            "zh-cn": "InfluxDB 3 日志记录"
+        },
+        "desc": {
+            "en": "Logs selected states into InfluxDB 3 (Core/Enterprise) with configurable tags and reads history via SQL",
+            "de": "Protokolliert ausgewählte Datenpunkte in InfluxDB 3 (Core/Enterprise) mit konfigurierbaren Tags und liest die Historie per SQL",
+            "ru": "Записывает выбранные состояния в InfluxDB 3 (Core/Enterprise) с настраиваемыми тегами и читает историю через SQL",
+            "pt": "Regista estados selecionados no InfluxDB 3 (Core/Enterprise) com etiquetas configuráveis e lê o histórico via SQL",
+            "nl": "Logt geselecteerde datapunten in InfluxDB 3 (Core/Enterprise) met instelbare tags en leest de historie via SQL",
+            "fr": "Enregistre les états sélectionnés dans InfluxDB 3 (Core/Enterprise) avec des tags configurables et lit l'historique via SQL",
+            "it": "Registra gli stati selezionati in InfluxDB 3 (Core/Enterprise) con tag configurabili e legge la cronologia tramite SQL",
+            "es": "Registra los estados seleccionados en InfluxDB 3 (Core/Enterprise) con etiquetas configurables y lee el historial mediante SQL",
+            "pl": "Zapisuje wybrane stany do InfluxDB 3 (Core/Enterprise) z konfigurowalnymi tagami i odczytuje historię przez SQL",
+            "uk": "Записує вибрані стани в InfluxDB 3 (Core/Enterprise) з налаштовуваними тегами та читає історію через SQL",
+            "zh-cn": "将选定状态记录到 InfluxDB 3（Core/Enterprise），支持可配置标签，并通过 SQL 读取历史"
+        },
+        "authors": ["Piotr Siedlak <siedlak.piotr@gmail.com>"],
+        "keywords": ["influxdb", "influxdb3", "history", "logging", "sql", "grafana"],
+        "licenseInformation": {
+            "type": "free",
+            "license": "MIT"
+        },
+        "platform": "Javascript/Node.js",
+        "icon": "influx_v3.png",
+        "enabled": true,
+        "extIcon": "https://raw.githubusercontent.com/piotr-siedlak/iobroker-influx_v3/main/admin/influx_v3.png",
+        "readme": "https://github.com/piotr-siedlak/iobroker-influx_v3/blob/main/README.md",
+        "loglevel": "info",
+        "tier": 1,
+        "mode": "daemon",
+        "type": "storage",
+        "compact": true,
+        "connectionType": "local",
+        "dataSource": "push",
+        "messagebox": true,
+        "supportCustoms": true,
+        "getHistory": true,
+        "preserveSettings": "custom",
+        "stopTimeout": 10000,
+        "adminUI": {
+            "config": "json",
+            "custom": "json"
+        },
+        "dependencies": [
+            {
+                "js-controller": ">=6.0.11"
+            }
+        ],
+        "globalDependencies": [
+            {
+                "admin": ">=7.6.20"
+            }
+        ]
+    },
+    "encryptedNative": ["token"],
+    "protectedNative": ["token"],
+    "native": {
+        "edition": "auto",
+        "url": "http://localhost:8181",
+        "database": "iobroker",
+        "token": "",
+        "tlsRejectUnauthorized": true,
+        "tlsCa": "",
+        "requestTimeoutMs": 10000,
+        "pingIntervalSec": 60,
+        "createDatabaseRetention": "",
+
+        "writeMode": "batched",
+        "batchMaxLines": 5000,
+        "batchMaxBytes": 1048576,
+        "flushIntervalMs": 2000,
+        "gzip": true,
+        "noSync": false,
+        "maxConcurrentWrites": 1,
+        "retryBaseDelayMs": 1000,
+        "retryMaxDelayMs": 60000,
+        "authRetryMs": 300000,
+
+        "bufferMode": "memory",
+        "bufferMaxRecords": 200000,
+        "bufferMaxBytes": 33554432,
+        "spoolMaxBytes": 268435456,
+        "bufferMaxAgeHours": 168,
+        "overflowPolicy": "dropOldest",
+        "persistOnShutdown": true,
+        "spoolFsync": true,
+        "shutdownFlushTimeoutMs": 5000,
+
+        "schemaMode": "grouped",
+        "tableNumber": "numeric_states",
+        "tableBoolean": "boolean_states",
+        "tableString": "string_states",
+        "tableRules": [],
+        "valueField": "value",
+        "maxTables": 2000,
+        "maxColumns": 500,
+        "maxStringLength": 65536,
+        "objectPolicy": "json",
+        "metaAck": "field",
+        "metaQ": "field",
+        "metaFrom": "none",
+
+        "globalTags": [],
+        "tagKeyStyle": "snake",
+        "autoTagRoom": true,
+        "autoTagFunction": true,
+        "autoTagAdapter": false,
+        "autoTagInstance": false,
+        "autoTagDevice": false,
+        "autoTagChannel": false,
+        "autoTagUnit": false,
+        "autoTagRole": false,
+        "autoTagName": false,
+        "nativeAllowlist": "",
+        "maxTagValuesPerKey": 1000,
+        "maxTagValueLength": 256,
+        "blockSensitiveTags": true,
+        "dynamicTagsEnabled": false,
+        "dynamicTagTtlSec": 3600,
+        "dynamicTagMaxValues": 100,
+
+        "changesOnly": true,
+        "debounceTime": 0,
+        "blockTime": 0,
+        "changesRelogInterval": 0,
+        "changesMinDelta": 0,
+        "storeOnStart": true,
+        "logSkippedBeforeChange": true,
+        "ackFilter": "all",
+        "qFilter": "all",
+        "round": "",
+        "storeAck": true,
+        "storeQ": true,
+        "storeFrom": false,
+
+        "historyMaxRows": 2000,
+        "historyHardLimit": 100000,
+        "queryTimeoutMs": 30000,
+        "queryMaxRows": 10000,
+        "queryMaxBytes": 10485760,
+        "defaultAggregate": "average",
+        "querySenders": "",
+        "allowUserQueries": true,
+
+        "subscribeAllThreshold": 20,
+        "logRejectedLimitPerMin": 10,
+        "statsIntervalSec": 10,
+        "writeStatsToInflux": false,
+        "debugStates": false
+    },
+    "objects": [],
+    "instanceObjects": [
+        {
+            "_id": "info",
+            "type": "channel",
+            "common": {
+                "name": {
+                    "en": "Information",
+                    "de": "Information",
+                    "pl": "Informacje"
+                }
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.connection",
+            "type": "state",
+            "common": {
+                "role": "indicator.connected",
+                "name": {
+                    "en": "Connected to InfluxDB 3",
+                    "de": "Mit InfluxDB 3 verbunden",
+                    "pl": "Połączono z InfluxDB 3"
+                },
+                "type": "boolean",
+                "read": true,
+                "write": false,
+                "def": false
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.serverVersion",
+            "type": "state",
+            "common": {
+                "role": "info.firmware",
+                "name": { "en": "InfluxDB server version and edition", "de": "InfluxDB-Serverversion und Edition", "pl": "Wersja i edycja serwera InfluxDB" },
+                "type": "string",
+                "read": true,
+                "write": false,
+                "def": ""
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.lastWrite",
+            "type": "state",
+            "common": {
+                "role": "date",
+                "name": { "en": "Last successful write", "de": "Letzter erfolgreicher Schreibvorgang", "pl": "Ostatni udany zapis" },
+                "type": "number",
+                "read": true,
+                "write": false,
+                "def": 0
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.lastRead",
+            "type": "state",
+            "common": {
+                "role": "date",
+                "name": { "en": "Last successful read", "de": "Letzter erfolgreicher Lesevorgang", "pl": "Ostatni udany odczyt" },
+                "type": "number",
+                "read": true,
+                "write": false,
+                "def": 0
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.lastError",
+            "type": "state",
+            "common": {
+                "role": "text",
+                "name": { "en": "Last error (secrets removed)", "de": "Letzter Fehler (ohne Geheimnisse)", "pl": "Ostatni błąd (bez sekretów)" },
+                "type": "string",
+                "read": true,
+                "write": false,
+                "def": ""
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.queueRecords",
+            "type": "state",
+            "common": {
+                "role": "value",
+                "name": { "en": "Records waiting in buffer", "de": "Datensätze im Puffer", "pl": "Rekordy oczekujące w buforze" },
+                "type": "number",
+                "read": true,
+                "write": false,
+                "def": 0
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.spoolBytes",
+            "type": "state",
+            "common": {
+                "role": "value",
+                "unit": "B",
+                "name": { "en": "Size of disk buffer", "de": "Größe des Festplattenpuffers", "pl": "Rozmiar bufora dyskowego" },
+                "type": "number",
+                "read": true,
+                "write": false,
+                "def": 0
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.writtenRecords",
+            "type": "state",
+            "common": {
+                "role": "value",
+                "name": { "en": "Records written since start", "de": "Seit Start geschriebene Datensätze", "pl": "Rekordy zapisane od startu" },
+                "type": "number",
+                "read": true,
+                "write": false,
+                "def": 0
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.rejectedRecords",
+            "type": "state",
+            "common": {
+                "role": "value",
+                "name": { "en": "Records rejected (invalid or refused by server)", "de": "Abgelehnte Datensätze", "pl": "Rekordy odrzucone (błędne lub odrzucone przez serwer)" },
+                "type": "number",
+                "read": true,
+                "write": false,
+                "def": 0
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.droppedRecords",
+            "type": "state",
+            "common": {
+                "role": "value",
+                "name": { "en": "Records dropped because of buffer limits", "de": "Wegen Pufferlimit verworfene Datensätze", "pl": "Rekordy porzucone z powodu limitu bufora" },
+                "type": "number",
+                "read": true,
+                "write": false,
+                "def": 0
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.enabledStates",
+            "type": "state",
+            "common": {
+                "role": "value",
+                "name": { "en": "Number of logged states", "de": "Anzahl protokollierter Datenpunkte", "pl": "Liczba rejestrowanych stanów" },
+                "type": "number",
+                "read": true,
+                "write": false,
+                "def": 0
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.conflicts",
+            "type": "state",
+            "common": {
+                "role": "json",
+                "name": { "en": "Mapping conflicts (JSON)", "de": "Zuordnungskonflikte (JSON)", "pl": "Konflikty mapowania (JSON)" },
+                "type": "string",
+                "read": true,
+                "write": false,
+                "def": "[]"
+            },
+            "native": {}
+        }
+    ]
+}

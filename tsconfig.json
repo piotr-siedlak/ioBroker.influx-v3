@@ -1,0 +1,21 @@
+{
+    "compilerOptions": {
+        "noEmit": true,
+        "skipLibCheck": true,
+        "outDir": "./build",
+        "rootDir": "./",
+        "module": "Node16",
+        "moduleResolution": "node16",
+        "esModuleInterop": true,
+        "resolveJsonModule": true,
+        "strict": true,
+        "noImplicitOverride": true,
+        "noFallthroughCasesInSwitch": true,
+        "useUnknownInCatchVariables": true,
+        "target": "es2022",
+        "lib": ["es2023"],
+        "sourceMap": true,
+        "types": ["node", "@iobroker/types", "mocha"]
+    },
+    "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"]
+}

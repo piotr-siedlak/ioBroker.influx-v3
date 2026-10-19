@@ -1,0 +1,10 @@
+node_modules/
+build/
+.dev-server/
+.idea/
+.vscode/
+*.tgz
+coverage/
+.nyc_output/
+.commitinfo
+test/.tmp/
