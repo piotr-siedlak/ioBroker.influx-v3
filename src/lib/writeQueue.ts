@@ -530,11 +530,8 @@ export class WriteQueue {
             }
             case 'transient': {
                 this.failures++;
-                let delay = backoffDelay(
-                    this.failures,
-                    this.opts.retryBaseDelayMs,
-                    this.opts.retryMaxDelayMs,
-                    this.timers.random,
+                let delay = backoffDelay(this.failures, this.opts.retryBaseDelayMs, this.opts.retryMaxDelayMs, () =>
+                    this.timers.random(),
                 );
                 if (result.retryAfterMs !== undefined) {
                     delay = Math.max(delay, result.retryAfterMs);

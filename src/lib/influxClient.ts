@@ -255,7 +255,28 @@ export class InfluxV3Client {
             return Promise.reject(new TransportError('client closed', 'ECLOSED'));
         }
         const mod = this.isHttps ? https : http;
-        return new Promise<HttpResponse>((resolve, reject) => {
+        return new Promise<HttpResponse>((resolvePromise, rejectPromise) => {
+            // exactly one outcome per request, whatever order socket/response events arrive in
+            let settled = false;
+            const holder: { req?: http.ClientRequest } = {};
+            const resolve = (r: HttpResponse): void => {
+                if (!settled) {
+                    settled = true;
+                    if (holder.req) {
+                        this.active.delete(holder.req);
+                    }
+                    resolvePromise(r);
+                }
+            };
+            const reject = (e: TransportError): void => {
+                if (!settled) {
+                    settled = true;
+                    if (holder.req) {
+                        this.active.delete(holder.req);
+                    }
+                    rejectPromise(e);
+                }
+            };
             const req = mod.request(
                 {
                     protocol: this.base.protocol,
@@ -276,15 +297,19 @@ export class InfluxV3Client {
                     const chunks: Buffer[] = [];
                     let size = 0;
                     res.on('data', (chunk: Buffer) => {
+                        if (settled) {
+                            return;
+                        }
                         size += chunk.length;
                         if (size > maxBytes) {
-                            req.destroy(new TransportError(`response larger than ${maxBytes} bytes`, 'ETOOBIG'));
+                            reject(new TransportError(`response larger than ${maxBytes} bytes`, 'ETOOBIG'));
+                            res.destroy();
+                            req.destroy();
                             return;
                         }
                         chunks.push(chunk);
                     });
                     res.on('end', () => {
-                        this.active.delete(req);
                         resolve({
                             status: res.statusCode ?? 0,
                             headers: res.headers,
@@ -292,19 +317,26 @@ export class InfluxV3Client {
                         });
                     });
                     res.on('error', err => {
-                        this.active.delete(req);
                         reject(
                             new TransportError(redact(err.message), (err as NodeJS.ErrnoException).code ?? 'ERESPONSE'),
                         );
                     });
+                    res.on('close', () => {
+                        if (!res.complete) {
+                            reject(
+                                new TransportError('connection closed before the response was complete', 'ECONNRESET'),
+                            );
+                        }
+                    });
                 },
             );
+            holder.req = req;
             this.active.add(req);
             req.setTimeout(timeoutMs, () => {
-                req.destroy(new TransportError(`timeout after ${timeoutMs} ms`, 'ETIMEDOUT'));
+                reject(new TransportError(`timeout after ${timeoutMs} ms`, 'ETIMEDOUT'));
+                req.destroy();
             });
             req.on('error', err => {
-                this.active.delete(req);
                 if (err instanceof TransportError) {
                     reject(err);
                 } else {

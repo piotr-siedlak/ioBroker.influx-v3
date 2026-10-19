@@ -452,13 +452,13 @@ export class SchemaRegistry {
                 reason: `column limit: table "${req.table}" would have ${total} columns (limit ${this.maxColumns})`,
             };
         }
-        if (total > this.maxColumns * 0.8) {
+        if (total >= this.maxColumns * 0.8) {
             warnings.push(`table "${req.table}" uses ${total} of ${this.maxColumns} columns`);
         }
         this.applyColumns(info, req, tagKeys);
         info.owners.add(req.stateId);
         this.claims.set(req.stateId, { ...req, tagKeys });
-        if (!exists && this.tableCount() > this.maxTables * 0.8) {
+        if (!exists && this.tableCount() >= this.maxTables * 0.8) {
             warnings.push(`${this.tableCount()} of ${this.maxTables} tables used`);
         }
         return { ok: true, droppedTags, warnings };

@@ -22,6 +22,14 @@ export default [
         },
     },
     {
+        // test helpers: inferred return types and async test bodies are fine
+        files: ['test/**/*.ts'],
+        rules: {
+            '@typescript-eslint/explicit-function-return-type': 'off',
+            '@typescript-eslint/require-await': 'off',
+        },
+    },
+    {
         languageOptions: {
             parserOptions: {
                 projectService: true,

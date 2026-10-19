@@ -4,7 +4,7 @@
 
 const PATTERNS: RegExp[] = [
     /(authorization\s*[:=]\s*)(bearer|token|basic)?\s*[^\s,;"'}]+/gi,
-    /\b(bearer|token)\s+[A-Za-z0-9._~+/=-]{8,}/gi,
+    /\b(?:bearer|token)\s+[A-Za-z0-9._~+/=-]{8,}/gi,
     /apiv3_[A-Za-z0-9_-]+/g,
     /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, // JWT
     /([?&](?:token|auth|password|p)=)[^&\s]+/gi,
