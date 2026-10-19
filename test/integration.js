@@ -10,7 +10,9 @@
 const path = require('node:path');
 const http = require('node:http');
 const assert = require('node:assert/strict');
+const { spawn } = require('node:child_process');
 const { tests } = require('@iobroker/testing');
+const ioPackage = require('../io-package.json');
 
 const URL = process.env.INFLUX3_NOAUTH_URL || process.env.INFLUX3_URL || '';
 const TOKEN = process.env.INFLUX3_NOAUTH_URL ? '' : process.env.INFLUX3_TOKEN || '';
@@ -18,10 +20,10 @@ const DB = 'iobharness';
 // unique per run, so data of earlier runs in the same database cannot interfere
 const BASE = `0_userdata.0.iv3_${Date.now().toString(36)}`;
 
-function sql(query) {
+function sql(query, db = DB) {
     return new Promise((resolve, reject) => {
         const u = new globalThis.URL(`${URL}/api/v3/query_sql`);
-        const body = JSON.stringify({ db: DB, q: query, format: 'json' });
+        const body = JSON.stringify({ db, q: query, format: 'json' });
         const req = http.request(
             {
                 hostname: u.hostname,
@@ -65,8 +67,8 @@ async function waitFor(fn, timeoutMs = 15000) {
     }
 }
 
-function sendTo(harness, command, message) {
-    return new Promise(resolve => harness.sendTo('influx_v3.0', command, message, resolve));
+function sendTo(harness, command, message, instance = 'influx_v3.0') {
+    return new Promise(resolve => harness.sendTo(instance, command, message, resolve));
 }
 
 function stateObject(type, custom, extra = {}) {
@@ -279,6 +281,65 @@ tests.integration(path.join(__dirname, '..'), {
                 if (TOKEN) {
                     assert.ok(!JSON.stringify(s).includes(TOKEN));
                 }
+            });
+
+            it('two instances run at the same time with different databases, tables and tags', async function () {
+                this.timeout(90000);
+                const DB2 = 'iobharness2';
+                // second instance object: copy of instance 0 (keeps the encrypted token) with another database
+                const inst0 = await harness.objects.getObjectAsync('system.adapter.influx_v3.0');
+                const inst1 = JSON.parse(JSON.stringify(inst0));
+                inst1._id = 'system.adapter.influx_v3.1';
+                inst1.common.enabled = true;
+                inst1.native.database = DB2;
+                inst1.native.globalTags = [{ key: 'site', value: 'second' }];
+                await harness.objects.setObjectAsync(inst1._id, inst1);
+                for (const o of ioPackage.instanceObjects) {
+                    await harness.objects.setObjectAsync(`influx_v3.1.${o._id}`, { ...o, _id: `influx_v3.1.${o._id}` });
+                }
+                const both = `${BASE}.both`;
+                const onlySecond = `${BASE}.onlySecond`;
+                await harness.objects.setObjectAsync(
+                    both,
+                    stateObject('number', {
+                        'influx_v3.0': { enabled: true, changesOnly: false, table: 'multi_a', customTags: [{ key: 'inst', value: 'zero' }] },
+                        'influx_v3.1': { enabled: true, changesOnly: false, table: 'multi_b', customTags: [{ key: 'inst', value: 'one' }] },
+                    }),
+                );
+                await harness.objects.setObjectAsync(onlySecond, stateObject('number', { 'influx_v3.1': { enabled: true, changesOnly: false } }));
+
+                const proc = spawn('node', ['build/main.js', '--console', '--instance', '1'], { cwd: harness.testAdapterDir, stdio: ['ignore', 'pipe', 'pipe'] });
+                let output = '';
+                proc.stdout.on('data', d => (output += d));
+                proc.stderr.on('data', d => (output += d));
+                try {
+                    await waitFor(async () => (await harness.states.getStateAsync('influx_v3.1.info.connection'))?.val === true, 30000);
+                    await waitFor(async () => Object.keys(await sendTo(harness, 'getEnabledDPs', {})).includes(both));
+                    const dps1 = await waitFor(async () => {
+                        const r = await sendTo(harness, 'getEnabledDPs', {}, 'influx_v3.1');
+                        return Object.keys(r).includes(both) && Object.keys(r).includes(onlySecond) ? r : null;
+                    }, 30000);
+                    assert.equal(dps1[both].table, 'multi_b');
+                    const dps0 = await sendTo(harness, 'getEnabledDPs', {});
+                    assert.equal(dps0[both].table, 'multi_a');
+                    assert.ok(!Object.keys(dps0).includes(onlySecond));
+
+                    await harness.states.setStateAsync(both, { val: 11, ack: true });
+                    await harness.states.setStateAsync(onlySecond, { val: 22, ack: true });
+                    const a = await waitFor(async () => (await sql(`SELECT value, inst, site FROM multi_a WHERE state_id = '${both}'`))[0]);
+                    assert.deepEqual(a, { value: 11, inst: 'zero', site: 'home' });
+                    const b = await waitFor(async () => (await sql(`SELECT value, inst, site FROM multi_b WHERE state_id = '${both}'`, DB2))[0]);
+                    assert.deepEqual(b, { value: 11, inst: 'one', site: 'second' });
+                    const c = await waitFor(async () => (await sql(`SELECT value FROM numeric_states WHERE state_id = '${onlySecond}'`, DB2))[0]);
+                    assert.equal(c.value, 22);
+                    const notInFirst = await sql(`SELECT count(*) AS n FROM numeric_states WHERE state_id = '${onlySecond}'`);
+                    assert.equal(Number(notInFirst[0].n), 0);
+                    await assert.rejects(() => sql(`SELECT * FROM multi_b`), /not found/, 'instance 0 never wrote table multi_b');
+                } finally {
+                    proc.kill('SIGTERM');
+                    await new Promise(r => proc.once('exit', r));
+                }
+                assert.ok(!/uncaught|unhandled/i.test(output), output.slice(-2000));
             });
 
             it('stops cleanly and flushes the buffer', async function () {
