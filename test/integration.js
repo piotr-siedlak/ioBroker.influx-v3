@@ -15,7 +15,8 @@ const { tests } = require('@iobroker/testing');
 const URL = process.env.INFLUX3_NOAUTH_URL || process.env.INFLUX3_URL || '';
 const TOKEN = process.env.INFLUX3_NOAUTH_URL ? '' : process.env.INFLUX3_TOKEN || '';
 const DB = 'iobharness';
-const BASE = '0_userdata.0.iv3';
+// unique per run, so data of earlier runs in the same database cannot interfere
+const BASE = `0_userdata.0.iv3_${Date.now().toString(36)}`;
 
 function sql(query) {
     return new Promise((resolve, reject) => {
@@ -158,11 +159,13 @@ tests.integration(path.join(__dirname, '..'), {
 
             it('registers only the states configured for this instance', async function () {
                 this.timeout(20000);
+                // the harness database may still contain objects of earlier runs → look at this run only
+                const ours = r => Object.keys(r).filter(id => id.startsWith(`${BASE}.`));
                 const dps = await waitFor(async () => {
                     const r = await sendTo(harness, 'getEnabledDPs', {});
-                    return Object.keys(r).length === 3 ? r : null;
+                    return ours(r).length === 3 ? r : null;
                 });
-                assert.deepEqual(Object.keys(dps).sort(), [objects.bool, objects.num, objects.str].sort());
+                assert.deepEqual(ours(dps).sort(), [objects.bool, objects.num, objects.str].sort());
                 assert.equal(dps[objects.num].table, 'numeric_states');
             });
 
@@ -179,7 +182,7 @@ tests.integration(path.join(__dirname, '..'), {
                 assert.equal(row.value, 21.5);
                 assert.equal(row.location, 'KOTLOWNIA');
                 assert.equal(row.sub_type, 'HC1');
-                assert.equal(row.device, 'iv3');
+                assert.equal(row.device, BASE.split('.')[2]);
                 assert.equal(row.site, 'home');
                 assert.equal(row.room, 'Boiler room');
                 assert.equal(row.channel, 'Heating circuit 1');
@@ -206,9 +209,15 @@ tests.integration(path.join(__dirname, '..'), {
 
             it('previewMapping shows table, tags and line protocol without saving', async function () {
                 this.timeout(20000);
-                const res = await sendTo(harness, 'previewMapping', { id: objects.num, config: { enabled: true, table: 'heating' } });
+                // Admin sends the complete (unsaved) form data of the custom dialog
+                const obj = await harness.objects.getObjectAsync(objects.num);
+                const config = { ...obj.common.custom['influx_v3.0'], table: 'heating' };
+                const res = await sendTo(harness, 'previewMapping', { id: objects.num, config });
                 assert.match(res.text, /Table: heating/);
                 assert.match(res.text, /location=KOTLOWNIA/);
+                assert.match(res.text, /sub_type=HC1/);
+                const dps = await sendTo(harness, 'getEnabledDPs', {});
+                assert.equal(dps[objects.num].table, 'numeric_states', 'preview does not change the configuration');
             });
 
             it('enableHistory works without restart and keeps the influxdb.0 settings untouched', async function () {
