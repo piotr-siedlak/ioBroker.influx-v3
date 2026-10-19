@@ -17,6 +17,21 @@ import {
     RETENTION_RE,
     tableRows,
 } from './lib/config';
+import {
+    compileStateFilter,
+    DataMigrationJob,
+    type DataMigrationSettings,
+    FileCheckpointStore,
+    type ImportItem,
+    type ImportTarget,
+    type JobOutcome,
+    jobKey,
+    newCheckpoint,
+    parseDataMigrationConfig,
+    previewImport,
+    type Progress as ImportProgress,
+    validateSource,
+} from './lib/dataMigration';
 import { type EmitReason, FilterPipeline, type PreparedState } from './lib/filterPipeline';
 import {
     buildHistoryQueries,
@@ -24,10 +39,13 @@ import {
     type HistoryTarget,
     mapHistoryRows,
     normalizeHistoryOptions,
+    quoteIdent,
 } from './lib/historyService';
 import { HttpError, InfluxV3Client } from './lib/influxClient';
+import { createLegacyReader, type LegacyPoint, type LegacySourceConfig } from './lib/legacySource';
 import { type LpRecord, LineProtocolError, serialize, type FieldValue } from './lib/lineProtocol';
-import { buildMigrationPreview } from './lib/migration';
+import { formatSettingsPreview, planSettingsMigration, preformattedHtml } from './lib/migration';
+import { applyTagRules, parseTagRules, type TagRule } from './lib/tagMapping';
 import { Observability } from './lib/observability';
 import { checkReadOnlyInfluxQL, checkReadOnlySql, senderAllowed } from './lib/queryService';
 import { redact, registerSecret } from './lib/redact';
@@ -47,6 +65,7 @@ import {
     type DynamicValue,
     checkTagAgainstCatalog,
     looksSensitive,
+    normalizeTagKey,
     type ResolvedTags,
     resolveDynamicTags,
     resolveTags,
@@ -108,6 +127,9 @@ export class InfluxV3Adapter extends utils.Adapter {
     private statsTimer?: ioBroker.Interval;
     private enumReloadTimer?: ioBroker.Timeout;
     private influxConnected = false;
+    /** running import of historical data */
+    private dmRun?: { ctrl: AbortController; done: Promise<JobOutcome> };
+    private dmLastProgress = 0;
 
     public constructor(options: Partial<utils.AdapterOptions> = {}) {
         super({ ...options, name: 'influx-v3' });
@@ -127,10 +149,17 @@ export class InfluxV3Adapter extends utils.Adapter {
         const { config, warnings } = normalizeInstanceConfig(this.config as unknown as Record<string, unknown>);
         this.cfg = config;
         registerSecret(config.token);
+        for (const k of ['dmPassword', 'dmToken']) {
+            const secret = (this.config as unknown as Record<string, unknown>)[k];
+            if (typeof secret === 'string' && secret) {
+                registerSecret(secret);
+            }
+        }
         for (const w of warnings) {
             this.log.warn(`Configuration: ${w}`);
         }
         await this.setStateAsync('info.connection', false, true);
+        await this.setStateAsync('info.dataMigration.running', false, true);
 
         this.schema = new SchemaRegistry(config.maxTables, config.maxColumns);
         this.cardinality = new CardinalityGuard(config.maxTagValuesPerKey, (key, limit) =>
@@ -271,6 +300,11 @@ export class InfluxV3Adapter extends utils.Adapter {
         this.clearInterval(this.pingTimer);
         this.clearInterval(this.statsTimer);
         this.clearTimeout(this.enumReloadTimer);
+        if (this.dmRun) {
+            // the import saves its progress and continues with "Start" after the restart
+            this.dmRun.ctrl.abort();
+            await Promise.race([this.dmRun.done, delay(3000)]);
+        }
         this.queue?.beginShutdown();
         for (const reg of this.registry.values()) {
             reg.pipeline.shutdown(); // writes values waiting in debounce/block windows, starts no new timers
@@ -1020,7 +1054,7 @@ export class InfluxV3Adapter extends utils.Adapter {
      * @param reg registration
      * @param s value
      */
-    private toRecord(reg: Registered, s: PreparedState): LpRecord {
+    private toRecord(reg: Registered, s: PreparedState, withDynamicTags = true): LpRecord {
         const fields: Record<string, FieldValue> = { [reg.target.field]: toFieldValue(s.val, reg.target.valueType) };
         if (reg.metaFields.ack) {
             fields.ack = { type: 'boolean', value: s.ack };
@@ -1032,7 +1066,7 @@ export class InfluxV3Adapter extends utils.Adapter {
             fields.from = { type: 'string', value: s.from };
         }
         const tags: Record<string, string> = { ...reg.staticTags };
-        if (reg.tags.dynamic.length) {
+        if (withDynamicTags && reg.tags.dynamic.length) {
             const dyn = resolveDynamicTags(
                 reg.tags.dynamic,
                 src => this.dynamicCache.get(src),
@@ -1157,12 +1191,31 @@ export class InfluxV3Adapter extends utils.Adapter {
                     return await this.handleListInfluxdbInstances(msg);
                 case 'getTagKeys':
                     return this.reply(msg, this.tagKeyOptions());
+                case 'getTagKeysForRules':
+                    return this.reply(msg, [
+                        ...this.cfg.tagDefinitions.map(d => ({ value: d.key, label: d.key })),
+                        { value: '-', label: '- (remove the tag)' },
+                    ]);
                 case 'getTagValues':
                     return this.reply(msg, this.tagValueOptions((msg.message as { key?: unknown } | undefined)?.key));
                 case 'migrationPreview':
-                    return await this.handleMigration(msg, false);
+                    return await this.handleMigration(msg, 'preview');
+                case 'migrationPreviewHtml':
+                    return await this.handleMigration(msg, 'html');
                 case 'migrationApply':
-                    return await this.handleMigration(msg, true);
+                    return await this.handleMigration(msg, 'apply');
+                case 'dmFillFromInfluxdb':
+                    return await this.handleDmFill(msg);
+                case 'dmTestSource':
+                    return await this.handleDmTest(msg);
+                case 'dmPreview':
+                    return await this.handleDmPreview(msg);
+                case 'dmStart':
+                    return await this.handleDmStart(msg);
+                case 'dmStop':
+                    return this.handleDmStop(msg);
+                case 'dmReset':
+                    return await this.handleDmReset(msg);
                 default:
                     this.log.debug(`Unknown command ${msg.command} from ${msg.from}`);
                     return this.reply(msg, { error: `Unknown command ${msg.command}` });
@@ -1633,64 +1686,457 @@ export class InfluxV3Adapter extends utils.Adapter {
         this.reply(msg, list.length ? list : [{ value: '', label: 'no influxdb instance found' }]);
     }
 
-    private async handleMigration(msg: ioBroker.Message, apply: boolean): Promise<void> {
-        const m = (msg.message ?? {}) as { source?: unknown; overwrite?: unknown; ids?: unknown };
+    private async handleMigration(msg: ioBroker.Message, mode: 'preview' | 'html' | 'apply'): Promise<void> {
+        const m = (msg.message ?? {}) as { source?: unknown; overwrite?: unknown; ids?: unknown; rules?: unknown };
         const source = typeof m.source === 'string' ? m.source : '';
         if (!/^influxdb\.\d+$/.test(source)) {
-            return this.reply(msg, { error: 'Select an influxdb instance (e.g. influxdb.0) first' });
+            const text = 'Select an influxdb instance (e.g. influxdb.0) first';
+            return this.reply(msg, mode === 'html' ? { text: preformattedHtml(text) } : { error: text });
         }
         const view = await this.getObjectViewAsync('system', 'custom', {});
         const rows = (view?.rows ?? []) as unknown as { id: string; value: Record<string, unknown> }[];
-        const preview = buildMigrationPreview(
+        // the Admin page sends the rules being edited (not saved yet); otherwise the saved ones are used
+        const rules = parseTagRules(
+            m.rules !== undefined ? m.rules : (this.config as unknown as Record<string, unknown>).migrationTagRules,
+        );
+        const plan = planSettingsMigration(
             rows.map(r => ({ id: r.id, custom: r.value ?? {} })),
             source,
             this.namespace,
+            {
+                rules,
+                catalog: this.cfg.tagDefinitions,
+                style: this.cfg.tagKeyStyle,
+                overwrite: m.overwrite === true,
+                ids: Array.isArray(m.ids)
+                    ? new Set(m.ids.filter((x): x is string => typeof x === 'string'))
+                    : undefined,
+            },
         );
-        const overwrite = m.overwrite === true;
-        const selected = Array.isArray(m.ids)
-            ? new Set(m.ids.filter((x): x is string => typeof x === 'string'))
-            : undefined;
-        const todo = preview.filter(p => (!p.alreadyConfigured || overwrite) && (!selected || selected.has(p.id)));
-        // custom tags of the classic adapter only work if their keys/values are in this instance's catalog
-        const notInCatalog = new Set<string>();
-        for (const item of todo) {
-            const { config: stateCfg } = normalizeStateConfig(item.proposed, this.cfg, item.id);
-            for (const t of stateCfg.customTags) {
-                const check = checkTagAgainstCatalog(t, this.cfg.tagDefinitions, this.cfg.tagKeyStyle);
-                if (!check.ok) {
-                    notInCatalog.add(`${t.key}=${t.value}`);
-                }
-            }
+        if (mode === 'html') {
+            return this.reply(msg, { text: preformattedHtml(formatSettingsPreview(plan)) });
         }
-        if (!apply) {
-            const text = [
-                `${preview.length} state(s) are logged by ${source}.`,
-                `${todo.length} would be configured for ${this.namespace} (${preview.length - todo.length} already configured, skipped).`,
-                ...todo.slice(0, 30).map(p => `• ${p.id}`),
-                todo.length > 30 ? `… and ${todo.length - 30} more` : '',
-                notInCatalog.size
-                    ? `Tags not in the tag catalog (ignored until you add their keys/values in the Tags tab): ${[...notInCatalog].slice(0, 20).join(', ')}`
-                    : '',
-                `Settings of ${source} are not changed. Historical data is not copied.`,
-            ]
-                .filter(Boolean)
-                .join('\n');
-            return this.reply(msg, { result: text, items: todo.map(p => p.id) });
+        if (mode === 'preview') {
+            return this.reply(msg, { result: formatSettingsPreview(plan, 30), items: plan.todo.map(p => p.id) });
         }
         let done = 0;
         const failed: string[] = [];
-        for (const item of todo) {
+        for (const item of plan.todo) {
             try {
-                await this.writeCustomConfig(item.id, item.proposed);
+                await this.writeCustomConfig(item.id, item.config);
                 done++;
             } catch (e) {
                 failed.push(`${item.id}: ${redact(e)}`);
             }
         }
-        this.log.info(`Migration from ${source}: ${done} state(s) configured by request of ${msg.from}`);
+        this.log.info(
+            `Migration from ${source}: ${done} state(s) configured by request of ${msg.from}${
+                plan.unmatched.size ? ` (${plan.unmatched.size} old tag value(s) did not fit the tag catalog)` : ''
+            }`,
+        );
         this.reply(msg, {
             result: `${done} state(s) configured for ${this.namespace}.${failed.length ? ` ${failed.length} failed.` : ''} ${source} was not changed.`,
             failed: failed.length ? failed : undefined,
+        });
+    }
+
+    // ------------------------------------------------------------------ import of historical data (ADR-0006)
+
+    private dmFile(): string {
+        return path.join(utils.getAbsoluteInstanceDataDir(this), 'data-migration.json');
+    }
+
+    private dmConfig(): {
+        source: LegacySourceConfig;
+        job: DataMigrationSettings;
+        warnings: string[];
+        rules: TagRule[];
+    } {
+        const warnings: string[] = [];
+        const native = this.config as unknown as Record<string, unknown>;
+        const { source, job } = parseDataMigrationConfig(native, warnings);
+        const rules = parseTagRules(native.migrationTagRules, warnings);
+        return { source, job, warnings, rules };
+    }
+
+    /** Copies the non-secret connection settings of an influxdb instance into the form (sendTo `useNative`). */
+    private async handleDmFill(msg: ioBroker.Message): Promise<void> {
+        const m = (msg.message ?? {}) as { instance?: unknown };
+        const inst = typeof m.instance === 'string' ? m.instance : '';
+        if (!/^influxdb\.\d+$/.test(inst)) {
+            return this.reply(msg, { error: 'Select an influxdb instance first' });
+        }
+        const obj = await this.getForeignObjectAsync(`system.adapter.${inst}`);
+        if (!obj) {
+            return this.reply(msg, { error: `${inst} not found` });
+        }
+        const n = (obj.native ?? {}) as Record<string, unknown>;
+        const v2 = n.dbversion === '2.x';
+        const protocol = n.protocol === 'https' ? 'https' : 'http';
+        const rawHost = typeof n.host === 'string' && n.host.trim() ? n.host.trim() : 'localhost';
+        const host = rawHost.includes(':') && !rawHost.startsWith('[') ? `[${rawHost}]` : rawHost;
+        const port = Number(n.port) > 0 ? Number(n.port) : 8086;
+        const p = v2 && typeof n.path === 'string' ? n.path.replace(/^\/+|\/+$/g, '') : '';
+        const native: Record<string, unknown> = {
+            dmInfluxdbInstance: inst,
+            dmVersion: v2 ? '2.x' : '1.x',
+            dmUrl: `${protocol}://${host}:${port}${p ? `/${p}` : ''}`,
+            dmRejectUnauthorized: n.validateSSL !== false,
+        };
+        if (v2) {
+            native.dmOrg = typeof n.organization === 'string' ? n.organization : '';
+            native.dmBucket = typeof n.dbname === 'string' ? n.dbname : '';
+        } else {
+            native.dmDatabase = typeof n.dbname === 'string' ? n.dbname : '';
+            native.dmUser = typeof n.user === 'string' ? n.user : '';
+        }
+        this.reply(msg, {
+            native,
+            result: `Connection settings of ${inst} copied. Enter the ${v2 ? 'token' : 'password'} (it cannot be read from ${inst}) and save.`,
+        });
+    }
+
+    private async handleDmTest(msg: ioBroker.Message): Promise<void> {
+        const { source, warnings } = this.dmConfig();
+        const errors = validateSource(source);
+        if (errors.length) {
+            return this.reply(msg, { error: errors.join('; ') });
+        }
+        const reader = createLegacyReader(source);
+        try {
+            const res = await reader.check();
+            if (!res.ok) {
+                return this.reply(msg, { error: `Old database: ${res.error}` });
+            }
+            const all = await reader.listMeasurements(20_000).catch(() => []);
+            const where = source.version === '1.x' ? `database "${source.database}"` : `bucket "${source.bucket}"`;
+            this.reply(msg, {
+                result: `Connected to InfluxDB ${(res.version || source.version).replace(/^v/, '')}: ${all.length >= 20_000 ? 'more than 20000' : all.length} measurement(s) in ${where}.${warnings.length ? ` Warnings: ${warnings.join('; ')}` : ''}`,
+            });
+        } finally {
+            reader.close();
+        }
+    }
+
+    /** Source measurement of a state: alias of its influxdb settings, else its id (rule of the classic adapter). */
+    private oldMeasurement(id: string, custom: Record<string, unknown> | undefined, instance: string): string {
+        const blocks = instance
+            ? [custom?.[instance]]
+            : Object.entries(custom ?? {})
+                  .filter(([k]) => /^influxdb\.\d+$/.test(k))
+                  .map(([, v]) => v);
+        for (const b of blocks) {
+            const alias = (b as Record<string, unknown> | undefined)?.aliasId;
+            if (typeof alias === 'string' && alias.trim()) {
+                return alias.trim();
+            }
+        }
+        return id;
+    }
+
+    private async dmItems(job: DataMigrationSettings, rules: readonly TagRule[]): Promise<ImportItem[]> {
+        const filter = compileStateFilter(job.stateFilter);
+        const view = await this.getObjectViewAsync('system', 'custom', {});
+        const customs = new Map(
+            ((view?.rows ?? []) as unknown as { id: string; value: Record<string, unknown> }[]).map(r => [
+                r.id,
+                r.value ?? {},
+            ]),
+        );
+        const items: ImportItem[] = [];
+        for (const reg of [...this.registry.values()].sort((a, b) => a.id.localeCompare(b.id))) {
+            if (reg.conflict || !filter(reg.id)) {
+                continue;
+            }
+            items.push({
+                id: reg.id,
+                measurement: this.oldMeasurement(reg.id, customs.get(reg.id), job.influxdbInstance),
+                table: reg.target.table,
+                convert: points => this.convertLegacy(reg.id, points, job.keepOldTags, rules),
+            });
+        }
+        return items;
+    }
+
+    /**
+     * Converts old points with the live mapping of the state (type, rounding, table, tags, metadata). Tags of the
+     * old points pass through the tag rules and the catalog and are added where the configuration sets no value.
+     */
+    private convertLegacy(
+        id: string,
+        points: LegacyPoint[],
+        keepOldTags: boolean,
+        rules: readonly TagRule[],
+    ): { lines: string[]; skipped: number } {
+        const reg = this.registry.get(id);
+        if (!reg || reg.conflict) {
+            return { lines: [], skipped: points.length };
+        }
+        const lines: string[] = [];
+        let skipped = 0;
+        const tagCache = new Map<string, Record<string, string>>();
+        for (const p of points) {
+            const res = coerceValue(p.value, reg.target.valueType, {
+                maxStringLength: this.cfg.maxStringLength,
+                objectPolicy: this.cfg.objectPolicy,
+            });
+            if (!res.ok) {
+                skipped++;
+                continue;
+            }
+            const val = typeof res.value === 'number' ? roundTo(res.value, reg.cfg.round) : res.value;
+            const rec = this.toRecord(
+                reg,
+                { val, ts: Math.round(p.ts), ack: p.ack ?? false, q: p.q ?? 0, from: p.from ?? '' },
+                false, // past values of dynamic tags are unknown
+            );
+            if (p.ack === undefined) {
+                delete rec.fields.ack;
+                delete rec.tags.ack;
+            }
+            if (p.q === undefined) {
+                delete rec.fields.q;
+                delete rec.tags.q;
+            }
+            if (keepOldTags) {
+                for (const [k, v] of Object.entries(this.mappedOldTags(p.tags, rules, tagCache))) {
+                    if (!(k in rec.tags) && !(k in rec.fields)) {
+                        rec.tags[k] = v;
+                    }
+                }
+            }
+            try {
+                lines.push(serialize(rec));
+            } catch {
+                skipped++;
+            }
+        }
+        return { lines, skipped };
+    }
+
+    private mappedOldTags(
+        tags: Record<string, string>,
+        rules: readonly TagRule[],
+        cache: Map<string, Record<string, string>>,
+    ): Record<string, string> {
+        const keys = Object.keys(tags).sort();
+        if (!keys.length) {
+            return {};
+        }
+        const cacheKey = JSON.stringify(keys.map(k => [k, tags[k]]));
+        let out = cache.get(cacheKey);
+        if (!out) {
+            out = {};
+            const mapped = applyTagRules(
+                keys.map(k => ({ key: k, value: tags[k] })),
+                rules,
+                this.cfg.tagDefinitions,
+                this.cfg.tagKeyStyle,
+            );
+            for (const t of mapped.tags) {
+                const k = normalizeTagKey(t.key, this.cfg.tagKeyStyle);
+                const v = t.value.slice(0, this.cfg.maxTagValueLength);
+                if (k && v && !(this.cfg.blockSensitiveTags && looksSensitive(k, v))) {
+                    out[k] = v;
+                }
+            }
+            cache.set(cacheKey, out);
+        }
+        return out;
+    }
+
+    private dmTarget(): ImportTarget {
+        return {
+            firstTime: async item => {
+                const reg = this.registry.get(item.id);
+                if (!reg || !this.client) {
+                    return undefined;
+                }
+                try {
+                    const rows = await this.client.querySql<{ first?: unknown }>(
+                        `SELECT CAST(MIN(time) AS BIGINT) / 1000000 AS first FROM ${quoteIdent(reg.target.table)} WHERE state_id = $sid`,
+                        { sid: reg.storeId },
+                    );
+                    const v = rows[0]?.first;
+                    return v === null || v === undefined || !Number.isFinite(Number(v)) ? undefined : Number(v);
+                } catch (e) {
+                    if (e instanceof HttpError && /not found|does not exist/i.test(`${e.message} ${e.body}`)) {
+                        return undefined; // table not created yet
+                    }
+                    throw e;
+                }
+            },
+            write: lines =>
+                this.client
+                    ? this.client.write(lines)
+                    : Promise.resolve({ kind: 'transient' as const, message: 'not connected' }),
+            busy: () => {
+                const st = this.queue?.stats();
+                return !!st && (st.circuit === 'open' || st.queuedRecords > this.cfg.bufferMaxRecords / 2);
+            },
+        };
+    }
+
+    private dmSleep(ms: number, signal: AbortSignal): Promise<void> {
+        return new Promise(resolve => {
+            if (signal.aborted) {
+                return resolve();
+            }
+            const timer: { handle?: ioBroker.Timeout } = {};
+            const onAbort = (): void => {
+                this.clearTimeout(timer.handle);
+                resolve();
+            };
+            timer.handle = this.setTimeout(() => {
+                signal.removeEventListener('abort', onAbort);
+                resolve();
+            }, ms);
+            if (timer.handle === undefined) {
+                return resolve(); // adapter is stopping
+            }
+            signal.addEventListener('abort', onAbort, { once: true });
+        });
+    }
+
+    private dmProgress(p: ImportProgress): void {
+        const now = Date.now();
+        if (p.running && now - this.dmLastProgress < 1000) {
+            return;
+        }
+        this.dmLastProgress = now;
+        void Promise.all([
+            this.setStateAsync('info.dataMigration.running', p.running, true),
+            this.setStateAsync('info.dataMigration.progress', p.percent, true),
+            this.setStateAsync('info.dataMigration.status', p.status, true),
+            this.setStateAsync('info.dataMigration.points', p.points, true),
+            this.setStateAsync('info.dataMigration.errors', p.errors, true),
+        ]).catch(e => this.log.debug(`Cannot update import status: ${redact(e)}`));
+    }
+
+    private dmKey(source: LegacySourceConfig, job: DataMigrationSettings, rules: readonly TagRule[]): string {
+        return jobKey(source, job, { rules, catalog: this.cfg.tagDefinitions, style: this.cfg.tagKeyStyle });
+    }
+
+    private async handleDmPreview(msg: ioBroker.Message): Promise<void> {
+        const { source, job, warnings, rules } = this.dmConfig();
+        const errors = validateSource(source);
+        if (errors.length) {
+            return this.reply(msg, { error: errors.join('; ') });
+        }
+        const items = await this.dmItems(job, rules);
+        const reader = createLegacyReader(source);
+        try {
+            const check = await reader.check();
+            if (!check.ok) {
+                return this.reply(msg, { error: `Old database: ${check.error}` });
+            }
+            const cp = await new FileCheckpointStore(this.dmFile()).load();
+            let text = await previewImport(
+                items,
+                { source: reader, target: this.dmTarget() },
+                job,
+                cp,
+                this.dmKey(source, job, rules),
+            );
+            const retention = await this.client?.getRetentionMs().catch(() => undefined);
+            if (retention) {
+                text += `\nNote: the InfluxDB 3 database keeps data only ${Math.round(retention / 86_400_000)} day(s) - older imported points are removed by the server.`;
+            }
+            if (warnings.length) {
+                text = `Warnings: ${warnings.join('; ')}\n\n${text}`;
+            }
+            const stamp = `Preview of ${new Date().toLocaleString()}\n\n`;
+            await this.setStateAsync('info.dataMigration.preview', preformattedHtml(stamp + text), true);
+            this.reply(msg, { result: 'Preview ready - see "Result of the preview" below.', text });
+        } finally {
+            reader.close();
+        }
+    }
+
+    private async handleDmStart(msg: ioBroker.Message): Promise<void> {
+        if (this.dmRun) {
+            return this.reply(msg, { error: 'The import is already running' });
+        }
+        const { source, job, warnings, rules } = this.dmConfig();
+        const errors = validateSource(source);
+        if (errors.length) {
+            return this.reply(msg, { error: errors.join('; ') });
+        }
+        const items = await this.dmItems(job, rules);
+        if (!items.length) {
+            return this.reply(msg, {
+                error: 'No state of this instance matches the selection - configure the states first (tab "Migration of settings")',
+            });
+        }
+        const key = this.dmKey(source, job, rules);
+        const store = new FileCheckpointStore(this.dmFile());
+        const cp = await store.load();
+        if (cp && cp.jobKey === key && cp.finished) {
+            return this.reply(msg, {
+                error: 'An import with these settings is already finished. "Reset progress" imports again.',
+            });
+        }
+        const reader = createLegacyReader(source);
+        const check = await reader.check();
+        if (!check.ok) {
+            reader.close();
+            return this.reply(msg, { error: `Old database: ${check.error}` });
+        }
+        const ctrl = new AbortController();
+        const runner = new DataMigrationJob(
+            {
+                source: reader,
+                target: this.dmTarget(),
+                store,
+                now: () => Date.now(),
+                sleep: (ms, signal) => this.dmSleep(ms, signal),
+                log: {
+                    info: m => this.log.info(redact(m)),
+                    warn: m => this.log.warn(redact(m)),
+                    debug: m => this.log.debug(redact(m)),
+                },
+                onProgress: p => this.dmProgress(p),
+            },
+            job,
+        );
+        const done = runner
+            .run(items, key, ctrl.signal)
+            .catch((e: unknown): JobOutcome => {
+                this.log.error(`Data import: ${redact(e)}`);
+                return 'failed';
+            })
+            .finally(() => {
+                reader.close();
+                this.dmRun = undefined;
+                void this.refreshSchema();
+            });
+        this.dmRun = { ctrl, done };
+        this.log.info(
+            `Data import started by ${msg.from}: ${items.length} state(s) from InfluxDB ${source.version}${warnings.length ? ` (warnings: ${warnings.join('; ')})` : ''}`,
+        );
+        this.reply(msg, { result: `Import of ${items.length} state(s) started - see the progress below and the log.` });
+    }
+
+    private handleDmStop(msg: ioBroker.Message): void {
+        if (!this.dmRun) {
+            return this.reply(msg, { result: 'No import is running.' });
+        }
+        this.dmRun.ctrl.abort();
+        this.log.info(`Data import stopped by ${msg.from}`);
+        this.reply(msg, { result: 'Stopping - the progress is saved, "Start" continues.' });
+    }
+
+    private async handleDmReset(msg: ioBroker.Message): Promise<void> {
+        if (this.dmRun) {
+            return this.reply(msg, { error: 'Stop the import first' });
+        }
+        const store = new FileCheckpointStore(this.dmFile());
+        // keeps the "first live value" times - otherwise imported points would be taken for live values
+        await store.save(newCheckpoint('reset', Date.now(), await store.load()));
+        this.dmProgress({ running: false, percent: 0, status: 'progress reset', points: 0, errors: 0, current: '' });
+        this.log.info(`Data import progress reset by ${msg.from}`);
+        this.reply(msg, {
+            result: 'Progress reset - "Start" imports from the beginning. Points imported before stay in InfluxDB 3; writing them again overwrites them.',
         });
     }
 }

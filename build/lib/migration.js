@@ -1,13 +1,11 @@
 "use strict";
-/**
- * Migration helper: proposes `influx-v3.N` per-state settings from existing `influxdb.N` settings.
- *
- * Read-only towards `influxdb.N`: its configuration is never changed or removed. Historical data
- * is NOT migrated (InfluxDB 1.x/2.x → 3 needs an export/import outside of ioBroker).
- */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.mapInfluxdbConfig = mapInfluxdbConfig;
 exports.buildMigrationPreview = buildMigrationPreview;
+exports.planSettingsMigration = planSettingsMigration;
+exports.formatSettingsPreview = formatSettingsPreview;
+exports.preformattedHtml = preformattedHtml;
+const tagMapping_1 = require("./tagMapping");
 const COPY_KEYS = [
     'changesOnly',
     'debounceTime',
@@ -75,5 +73,111 @@ function buildMigrationPreview(objects, sourceInstance, targetNamespace) {
         });
     }
     return items.sort((a, b) => a.id.localeCompare(b.id));
+}
+/**
+ * Plans the settings migration: which states are configured and with which tags.
+ *
+ * @param objects rows of the `system/custom` view
+ * @param source e.g. `influxdb.0`
+ * @param target e.g. `influx-v3.0`
+ * @param opts rules, catalog, overwrite flag and optional selection of ids
+ * @param opts.rules tag rules
+ * @param opts.catalog tag catalog of the target instance
+ * @param opts.style tag key style of the target instance
+ * @param opts.overwrite also re-configure states that are already configured
+ * @param opts.ids only these ids
+ */
+function planSettingsMigration(objects, source, target, opts) {
+    const preview = buildMigrationPreview(objects, source, target);
+    const todo = [];
+    const unmatched = new Map();
+    for (const item of preview) {
+        if ((item.alreadyConfigured && !opts.overwrite) || (opts.ids && !opts.ids.has(item.id))) {
+            continue;
+        }
+        const oldTags = item.proposed.customTags ?? [];
+        const tagResult = (0, tagMapping_1.applyTagRules)(oldTags, opts.rules, opts.catalog, opts.style);
+        for (const o of tagResult.outcomes) {
+            if (o.status === 'rejected' || o.status === 'conflict') {
+                const k = `${o.from.key}=${o.from.value}`;
+                const e = unmatched.get(k);
+                if (e) {
+                    e.count++;
+                }
+                else {
+                    unmatched.set(k, { count: 1, reason: o.reason });
+                }
+            }
+        }
+        const config = { ...item.proposed };
+        if (oldTags.length) {
+            config.customTags = tagResult.tags;
+        }
+        todo.push({ ...item, tagResult, config });
+    }
+    return {
+        source,
+        target,
+        total: preview.length,
+        todo,
+        skipped: preview.filter(p => p.alreadyConfigured && !opts.overwrite).length,
+        unmatched,
+    };
+}
+/**
+ * Text of the preview: per state the tag translation, then the old tags that still do not fit.
+ *
+ * @param plan migration plan
+ * @param maxStates maximum number of listed states
+ */
+function formatSettingsPreview(plan, maxStates = 60) {
+    const lines = [
+        `${plan.total} state(s) are logged by ${plan.source}: ${plan.todo.length} will be configured for ${plan.target}${plan.skipped ? `, ${plan.skipped} already configured (skipped).` : '.'}`,
+    ];
+    const withTags = plan.todo.filter(p => p.tagResult.outcomes.length);
+    const withoutTags = plan.todo.length - withTags.length;
+    const listed = [...withTags, ...plan.todo.filter(p => !p.tagResult.outcomes.length)].slice(0, maxStates);
+    if (listed.length) {
+        lines.push('');
+    }
+    for (const item of listed) {
+        if (!item.tagResult.outcomes.length) {
+            lines.push(`• ${item.id}`);
+            continue;
+        }
+        lines.push(`• ${item.id}`);
+        for (const o of item.tagResult.outcomes) {
+            lines.push(`    ${(0, tagMapping_1.describeOutcome)(o)}`);
+        }
+    }
+    if (plan.todo.length > listed.length) {
+        lines.push(`… and ${plan.todo.length - listed.length} more state(s)`);
+    }
+    if (withoutTags && listed.length < plan.todo.length) {
+        lines.push(`(${withoutTags} state(s) without custom tags)`);
+    }
+    if (plan.unmatched.size) {
+        lines.push('', 'Old tags that are NOT written - add a tag rule or extend the tag catalog (Tags tab):');
+        const sorted = [...plan.unmatched.entries()].sort((a, b) => b[1].count - a[1].count);
+        for (const [k, v] of sorted.slice(0, 40)) {
+            lines.push(`    ${k} - ${v.count} state(s): ${v.reason}`);
+        }
+        if (sorted.length > 40) {
+            lines.push(`    … and ${sorted.length - 40} more`);
+        }
+    }
+    lines.push('', `Settings of ${plan.source} are not changed. Historical data: tab "Migration of data".`);
+    return lines.join('\n');
+}
+/**
+ * Wraps plain text as HTML for a `textSendTo` control (`container: html`), everything escaped.
+ *
+ * @param text plain text
+ * @param color optional text colour
+ */
+function preformattedHtml(text, color) {
+    const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const style = `white-space:pre-wrap;font-family:monospace;font-size:12px;max-height:480px;overflow:auto${color ? `;color:${color}` : ''}`;
+    return `<div style="${style}">${esc}</div>`;
 }
 //# sourceMappingURL=migration.js.map

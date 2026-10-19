@@ -27,7 +27,7 @@ its instances or settings.
 * `getHistory` for ioBroker charts (raw, average, min, max, min/max, sum, count, percentile, quantile — computed in
   InfluxDB with `date_bin`), read-only SQL and InfluxQL via `sendTo`
 * Admin UI (JSON Config) in all 11 ioBroker languages (incl. English, Polish, German), connection test, mapping preview, diagnostics,
-  migration wizard for `influxdb` settings
+  migration of `influxdb` settings with **tag rules**, and **import of the historical data** from InfluxDB 1.x/2.x
 * Multiple instances with different servers/databases
 
 ## Requirements and supported editions
@@ -85,7 +85,8 @@ On **Enterprise**, create a resource token with read+write permission for the on
 | History & queries | row limits, timeouts, default aggregation, user queries and allowed senders |
 | Advanced | subscription threshold, log rate limits, statistics interval, statistics into InfluxDB (opt-in) |
 | Diagnostics | connection, server version, written/rejected/dropped records, buffer, last error |
-| Migration | copy per-state settings from an `influxdb.N` instance (preview → apply, nothing is changed in `influxdb.N`) |
+| Migration of settings | copy per-state settings from an `influxdb.N` instance, translating its custom tags with **tag rules** (live preview → apply; nothing is changed in `influxdb.N`) |
+| Migration of data | import the history of the logged states from the old InfluxDB 1.x/2.x database (test, preview, start/stop/resume, live progress) |
 
 ## Per-state configuration
 
@@ -199,6 +200,15 @@ sendTo('influx-v3.0', 'flushBuffer', {}, cb);
 sendTo('influx-v3.0', 'getSchema', {}, cb);              // tables, columns, retention
 sendTo('influx-v3.0', 'getAdapterStats', {}, cb);        // counters, buffer, conflicts
 sendTo('influx-v3.0', 'previewMapping', { id, config }, cb); // table, tags and line protocol of a (draft) config
+
+// migration (Admin buttons): settings with tag rules, import of historical data (uses the saved dm* settings)
+sendTo('influx-v3.0', 'migrationPreview', { source: 'influxdb.0', rules: [{ fromKey: 'room', toKey: 'Location' }] }, cb);
+sendTo('influx-v3.0', 'migrationApply', { source: 'influxdb.0', rules, overwrite: false, ids: [/* optional */] }, cb);
+sendTo('influx-v3.0', 'dmTestSource', {}, cb);
+sendTo('influx-v3.0', 'dmPreview', {}, cb);              // also stored as HTML in info.dataMigration.preview
+sendTo('influx-v3.0', 'dmStart', {}, cb);                // runs in the background, progress in info.dataMigration.*
+sendTo('influx-v3.0', 'dmStop', {}, cb);
+sendTo('influx-v3.0', 'dmReset', {}, cb);
 ```
 
 `getHistory` aggregates: `none`/`onchange` (raw, plus one border value on each side unless `removeBorderValues`),
@@ -217,9 +227,48 @@ filters, `date_bin` aggregation, boolean counting, room/unit/adapter filters and
 
 ## Migration from ioBroker.influxdb
 
-Tab *Migration*: choose the `influxdb.N` instance → *Preview* → *Apply*. Copied: enabled, filters, debounce/block
-time, rounding, alias, storage type, custom tags. Never changed: the settings of `influxdb.N`. Historical data is
-**not** migrated (export it from InfluxDB 1.x/2.x and write it with `influxdb3 write` or the `storeState` command).
+Two steps, both in the instance settings. The classic adapter and its database are never changed – both adapters
+can run side by side during the transition. Design: [ADR-0006](docs/adr/0006-migration-tag-rules-and-history-import.md).
+
+### 1. Migration of settings (with tag rules)
+
+Choose the `influxdb.N` instance. Copied per state: enabled, filters, debounce/block time, rounding, alias, storage
+type and custom tags. Custom tags must fit the [tag catalog](#tags), so they are translated with **tag rules**:
+
+| Old key | Old value | New key | New value | Effect |
+| --- | --- | --- | --- | --- |
+| `room` | *(empty)* | `Location` | *(empty)* | `room=Salon` → `Location=SALON` (spelling adapted to the catalog) |
+| `room` | `Kotłownia` | `Location` | `KOTLOWNIA` | value renamed |
+| `source` | | `-` | | tag removed |
+| `typ` | | *(empty)* | `heating` | key kept, value replaced |
+
+A rule for a specific old value wins over a rule for every value. The **live preview** (updated while you edit the
+rules, before saving) lists per state the old tags, the result and every old `key=value` that still does not fit the
+catalog, with the number of states – add a rule or extend the catalog until the list is empty. *Apply* writes only
+tags allowed by the catalog. The same rules translate the tags stored in the old points during the data import.
+
+### 2. Migration of data (import of the history)
+
+1. Choose the `influxdb.N` instance and press *Copy connection settings* (URL, version, database/bucket,
+   organisation, user). Enter the password (1.x) or a read token (2.x) – they cannot be read from another adapter.
+   They are stored encrypted and never logged. **Save.**
+2. Optional: limit the states (`hm-rpc.0.*, javascript.0.*`) and the period.
+3. *Test connection*, then *Preview (dry run)*: per state the old measurement (alias of the `influxdb.N` settings,
+   else the id), the old and the imported period, the target table and the first converted records; old
+   measurements that belong to no configured state are listed too. Nothing is written.
+4. *Start / continue*. Progress, imported and rejected points are shown live (`info.dataMigration.*`).
+   *Stop* or an adapter restart keeps the progress – *Start* continues where it stopped. *Reset progress* starts
+   the next import from the beginning.
+
+How the points are written: exactly like live values of the state today (table, catalog tags, metadata, rounding,
+value type; values that cannot be converted are counted and skipped). By default each state is imported only up to
+the first value influx-v3 already wrote for it, so history and live data do not overlap; writing the same point twice
+only overwrites it. The import writes directly (not through the live buffer) and waits while the live buffer fills up.
+
+Limits: dynamic `{state:…}` tags are not reconstructed for the past. InfluxDB 3 Core cannot delete single points –
+check the preview before *Start*; a second import with other tag rules creates additional series (to redo it, drop
+the table). Core is optimised for recent data: queries over many imported years may hit the server's
+`--query-file-limit` (raise it or query shorter periods).
 
 ## Troubleshooting
 
@@ -242,10 +291,11 @@ npm run build            # TypeScript → build/ (committed: commit it together 
 npm run lint && npm run check
 npm run test:unit        # unit tests, no network
 eval "$(scripts/influx3-test-server.sh start)"   # isolated InfluxDB 3 Core in Docker
-npm run test:influx      # tests against the real server (incl. outage/replay and kill -9 recovery)
+eval "$(scripts/legacy-influx-test-server.sh start)"   # InfluxDB 1.8 + 2.7 as import sources (optional)
+npm run test:influx      # tests against the real servers (incl. outage/replay, kill -9 recovery, import 1.x/2.x → 3)
 npm run test:integration # js-controller harness (adapter lifecycle; end-to-end with INFLUX3_* set)
 npx tsx scripts/loadtest.ts 100,1000,10000 20
-scripts/influx3-test-server.sh stop
+scripts/influx3-test-server.sh stop && scripts/legacy-influx-test-server.sh stop
 ```
 
 Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · Decisions: [docs/adr/](docs/adr) ·
@@ -266,6 +316,10 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 * (Piotr Siedlak) Only adapter-managed timers during operation; shutdown never starts new timers
 * (Piotr Siedlak) Fixed: a value set right after logging was enabled for a state could be lost
 * (Piotr Siedlak) Settings tables are also accepted when they are stored as objects (e.g. written by scripts)
+* (Piotr Siedlak) Migration of settings: tag rules translate the custom tags of influxdb into catalog tags, with a
+  live preview of the result and of the tags that still do not fit
+* (Piotr Siedlak) New tab "Migration of data": import of the history from InfluxDB 1.x/2.x (preview, start/stop,
+  resume after restart, live progress); points are written like live values, old tags pass the tag rules
 
 ### 0.1.0 (2026-10-19)
 

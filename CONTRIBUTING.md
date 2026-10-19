@@ -14,7 +14,7 @@ Thank you for helping! Please:
 npm run lint
 npm run check
 npm run test:unit
-eval "$(scripts/influx3-test-server.sh start)" && npm run test:influx && npm run test:integration
+eval "$(scripts/influx3-test-server.sh start)" && eval "$(scripts/legacy-influx-test-server.sh start)" && npm run test:influx && npm run test:integration
 ```
 
 6. UI texts: add every new key to all 11 files in `admin/i18n/` (`npm run translate` can fill missing languages,

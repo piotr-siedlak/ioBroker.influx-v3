@@ -31,7 +31,10 @@ ioBroker ───────────────────────�
 | `HistoryService` (`lib/historyService.ts`) | translates ioBroker `getHistory` options into parameterised SQL (`date_bin`, `selector_min/max`, `approx_percentile_cont`), maps rows to `{val, ts, ack, q, from}` | pure SQL builder + I/O |
 | `QueryService` (`lib/queryService.ts`) | read-only guard for user SQL/InfluxQL, row/size limits, sender allow-list | pure guard + I/O |
 | `Observability` (`lib/observability.ts`) | counters, last success/error times, periodic (10 s) publication to `info.*`, never written to InfluxDB unless explicitly enabled | yes |
-| `Migration` (`lib/migration.ts`) | explicit, previewable copy of `influxdb.N` per-state settings into `influx-v3.N` | pure mapping + I/O on user request |
+| `Migration` (`lib/migration.ts`) | explicit, previewable copy of `influxdb.N` per-state settings into `influx-v3.N`; custom tags translated by the tag rules | pure mapping + I/O on user request |
+| `TagMapping` (`lib/tagMapping.ts`) | tag rules (old key/value → catalog key/value, remove), catalog spelling, conflicts — shared by both migrations (ADR-0006) | yes |
+| `LegacySource` (`lib/legacySource.ts`) | read-only readers for the old databases: InfluxDB 1.x (InfluxQL `GROUP BY *`), InfluxDB 2.x (Flux `pivot`, annotated CSV); quoting of identifiers/strings | pure parsers + I/O |
+| `DataMigration` (`lib/dataMigration.ts`) | import job: adaptive time windows, batch writes with retry, live-queue priority, checkpoint/resume, progress, dry-run preview; source/target/store/clock injected | yes (fakes) |
 | `redact` (`lib/redact.ts`) | removes tokens/authorization headers from any text that may be logged or returned | yes |
 
 ## Data flow of one state change
@@ -84,7 +87,7 @@ promise.
 
 ## Security
 
-See ADR-0005. Summary: token only in `encryptedNative`; never logged (central redaction); diagnostics do
+See ADR-0005. Summary: token (and the password/token of the old database for the import) only in `encryptedNative`; never logged (central redaction); diagnostics do
 not echo the token; user SQL is restricted to read-only statements and limited in rows/bytes/time;
 optional sender allow-list; no HTTP port is opened by the adapter.
 
@@ -97,6 +100,6 @@ src/lib/*.ts      modules above
 test/unit/        mocha unit tests (no network)
 test/influx/      tests against a real InfluxDB 3 Core (Docker) — skipped when INFLUX3_URL is not set
 test/integration.js, test/package.js   @iobroker/testing (real js-controller)
-scripts/          influx3-test-server.sh, load test
+scripts/          influx3-test-server.sh, legacy-influx-test-server.sh (InfluxDB 1.8/2.7), load test
 docs/             RESEARCH, ARCHITECTURE, adr/, GRAFANA, CONFIGURATION, pl/README
 ```

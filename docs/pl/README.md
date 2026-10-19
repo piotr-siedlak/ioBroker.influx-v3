@@ -30,7 +30,7 @@ awarie oraz odczytem historii i zapytaniami SQL. Jest to **niezależny** adapter
 * `getHistory` dla wykresów ioBrokera (surowe, średnia, min, max, min/max, suma, liczba, percentyl, kwantyl —
   liczone w InfluxDB przez `date_bin`), zapytania SQL i InfluxQL tylko do odczytu przez `sendTo`
 * Interfejs Admin (JSON Config) we wszystkich 11 językach ioBrokera (m.in. polski, angielski, niemiecki), test połączenia, podgląd mapowania,
-  diagnostyka, kreator migracji ustawień z `influxdb`
+  diagnostyka, migracja ustawień z `influxdb` z **regułami tagów** oraz **import danych historycznych** z InfluxDB 1.x/2.x
 * Wiele instancji z różnymi serwerami/bazami
 
 ## Wymagania i obsługiwane edycje
@@ -99,7 +99,8 @@ i pokazuje edycję, wersję, istnienie bazy i retencję — nigdy token.
 | Odczyty i historia | limity wierszy, limity czasu, domyślna agregacja, zapytania użytkownika i dozwoleni nadawcy |
 | Zaawansowane | próg subskrypcji wszystkich stanów, limity logów, interwał statystyk, statystyki do InfluxDB (opcjonalnie) |
 | Diagnostyka | połączenie, wersja serwera, zapisane/odrzucone/porzucone rekordy, bufor, ostatni błąd |
-| Migracja z influxdb | kopiowanie ustawień stanów z instancji `influxdb.N` (podgląd → zastosuj; `influxdb.N` pozostaje bez zmian) |
+| Migracja ustawień | kopiowanie ustawień stanów z instancji `influxdb.N` z tłumaczeniem własnych tagów przez **reguły tagów** (podgląd na żywo → zastosuj; `influxdb.N` pozostaje bez zmian) |
+| Migracja danych | import historii zapisywanych stanów ze starej bazy InfluxDB 1.x/2.x (test, podgląd, start/stop/wznowienie, postęp na żywo) |
 
 ## Konfiguracja per stan (zębatka)
 
@@ -240,10 +241,52 @@ WHERE "Location" = 'KOTLOWNIA' AND "Device" = 'PC' AND "Sub-Type" IN ('HC1', 'HC
 
 ## Migracja z ioBroker.influxdb
 
-Zakładka *Migracja z influxdb*: wybierz instancję `influxdb.N` → *Podgląd* → *Zastosuj*. Kopiowane: włączenie,
-filtry, debounce/czas blokady, zaokrąglanie, alias, typ zapisu, własne tagi. Nigdy niezmieniane: ustawienia
-`influxdb.N`. Dane historyczne **nie** są migrowane (wyeksportuj je z InfluxDB 1.x/2.x i zapisz przez
-`influxdb3 write` albo polecenie `storeState`).
+Dwa kroki, oba w ustawieniach instancji. Klasyczny adapter i jego baza nigdy nie są zmieniane – w okresie
+przejściowym oba adaptery mogą działać równolegle. Projekt: [ADR-0006](../adr/0006-migration-tag-rules-and-history-import.md).
+
+### 1. Migracja ustawień (z regułami tagów)
+
+Wybierz instancję `influxdb.N`. Dla każdego stanu kopiowane są: włączenie, filtry, debounce/czas blokady,
+zaokrąglanie, alias, typ zapisu i własne tagi. Własne tagi muszą pasować do [katalogu tagów](#tagi), dlatego są
+tłumaczone **regułami tagów**:
+
+| Stary klucz | Stara wartość | Nowy klucz | Nowa wartość | Efekt |
+| --- | --- | --- | --- | --- |
+| `room` | *(puste)* | `Location` | *(puste)* | `room=Salon` → `Location=SALON` (pisownia dopasowana do katalogu) |
+| `room` | `Kotłownia` | `Location` | `KOTLOWNIA` | zmiana wartości |
+| `source` | | `-` | | tag usunięty |
+| `typ` | | *(puste)* | `heating` | klucz bez zmian, nowa wartość |
+
+Reguła dla konkretnej starej wartości ma pierwszeństwo przed regułą dla każdej wartości. **Podgląd na żywo**
+(aktualizowany podczas edycji reguł, jeszcze przed zapisem) pokazuje dla każdego stanu stare tagi, wynik oraz każdą
+starą parę `klucz=wartość`, która nadal nie pasuje do katalogu, z liczbą stanów – dodaj regułę albo rozszerz katalog,
+aż lista będzie pusta. *Zastosuj* zapisuje tylko tagi dozwolone przez katalog. Te same reguły tłumaczą tagi zapisane
+w starych punktach podczas importu danych.
+
+### 2. Migracja danych (import historii)
+
+1. Wybierz instancję `influxdb.N` i naciśnij *Skopiuj ustawienia połączenia* (URL, wersja, baza/bucket,
+   organizacja, użytkownik). Wpisz hasło (1.x) albo token do odczytu (2.x) – nie da się ich odczytać z innego
+   adaptera. Są przechowywane w postaci zaszyfrowanej i nigdy nie trafiają do logów. **Zapisz.**
+2. Opcjonalnie: ogranicz stany (`hm-rpc.0.*, javascript.0.*`) i okres.
+3. *Testuj połączenie*, potem *Podgląd (próba bez zapisu)*: dla każdego stanu stary pomiar (alias z ustawień
+   `influxdb.N`, w przeciwnym razie identyfikator), stary i importowany okres, tabela docelowa oraz pierwsze
+   przekonwertowane rekordy; wymienione są też stare pomiary, które nie należą do żadnego skonfigurowanego stanu.
+   Nic nie jest zapisywane.
+4. *Start / kontynuuj*. Postęp, zaimportowane i odrzucone punkty widać na żywo (`info.dataMigration.*`).
+   *Stop* albo restart adaptera zachowuje postęp – *Start* kontynuuje od miejsca zatrzymania. *Resetuj postęp*
+   powoduje, że następny import zacznie się od początku.
+
+Jak zapisywane są punkty: dokładnie tak jak dzisiejsze wartości bieżące stanu (tabela, tagi z katalogu, metadane,
+zaokrąglanie, typ wartości; wartości, których nie da się przekonwertować, są liczone i pomijane). Domyślnie każdy stan
+jest importowany tylko do pierwszej wartości, którą influx-v3 już dla niego zapisał, więc historia i dane bieżące się
+nie nakładają; ponowny zapis tego samego punktu tylko go nadpisuje. Import zapisuje bezpośrednio (nie przez bufor
+bieżących danych) i czeka, gdy bufor bieżących danych się zapełnia.
+
+Ograniczenia: dynamiczne tagi `{state:…}` nie są odtwarzane dla przeszłości. InfluxDB 3 Core nie potrafi usuwać
+pojedynczych punktów – sprawdź podgląd przed *Start*; drugi import z innymi regułami tagów tworzy dodatkowe serie (aby
+go powtórzyć, usuń tabelę). Core jest zoptymalizowany pod najnowsze dane: zapytania obejmujące wiele zaimportowanych
+lat mogą trafić na limit serwera `--query-file-limit` (zwiększ go albo pytaj o krótsze okresy).
 
 ## Rozwiązywanie problemów
 
@@ -266,10 +309,11 @@ npm run build                                      # build/ jest w repozytorium 
 npm run lint && npm run check
 npm run test:unit                                  # testy jednostkowe, bez sieci
 eval "$(scripts/influx3-test-server.sh start)"     # izolowany InfluxDB 3 Core w Dockerze
-npm run test:influx                                # testy z prawdziwym serwerem (w tym awaria/replay i kill -9)
+eval "$(scripts/legacy-influx-test-server.sh start)"  # InfluxDB 1.8 + 2.7 jako źródła importu (opcjonalnie)
+npm run test:influx                                # testy z prawdziwymi serwerami (awaria/replay, kill -9, import 1.x/2.x → 3)
 npm run test:integration                           # js-controller (cykl życia; end-to-end przy ustawionych INFLUX3_*)
 npx tsx scripts/loadtest.ts 100,1000,10000 20      # test obciążenia
-scripts/influx3-test-server.sh stop
+scripts/influx3-test-server.sh stop && scripts/legacy-influx-test-server.sh stop
 ```
 
 ## Licencja

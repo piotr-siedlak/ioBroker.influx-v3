@@ -91,10 +91,14 @@
         ]
     },
     "encryptedNative": [
-        "token"
+        "token",
+        "dmPassword",
+        "dmToken"
     ],
     "protectedNative": [
-        "token"
+        "token",
+        "dmPassword",
+        "dmToken"
     ],
     "native": {
         "edition": "auto",
@@ -184,7 +188,27 @@
         "writeStatsToInflux": false,
         "debugStates": false,
         "migrationSource": "",
-        "migrationOverwrite": false
+        "migrationOverwrite": false,
+        "migrationTagRules": [],
+        "dmInfluxdbInstance": "",
+        "dmVersion": "2.x",
+        "dmUrl": "",
+        "dmDatabase": "",
+        "dmRetentionPolicy": "",
+        "dmUser": "",
+        "dmPassword": "",
+        "dmOrg": "",
+        "dmBucket": "",
+        "dmToken": "",
+        "dmRejectUnauthorized": true,
+        "dmTimeoutSec": 120,
+        "dmStates": "",
+        "dmFrom": "",
+        "dmTo": "",
+        "dmUntilFirstV3": true,
+        "dmKeepOldTags": true,
+        "dmBatchSize": 5000,
+        "dmPauseMs": 0
     },
     "objects": [],
     "instanceObjects": [
@@ -402,6 +426,121 @@
                 "read": true,
                 "write": false,
                 "def": "[]"
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.dataMigration",
+            "type": "channel",
+            "common": {
+                "name": {
+                    "en": "Import of historical data",
+                    "de": "Import historischer Daten",
+                    "pl": "Import danych historycznych"
+                }
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.dataMigration.running",
+            "type": "state",
+            "common": {
+                "role": "indicator",
+                "name": {
+                    "en": "Import running",
+                    "de": "Import läuft",
+                    "pl": "Import w toku"
+                },
+                "type": "boolean",
+                "read": true,
+                "write": false,
+                "def": false
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.dataMigration.progress",
+            "type": "state",
+            "common": {
+                "role": "value",
+                "name": {
+                    "en": "Import progress",
+                    "de": "Import-Fortschritt",
+                    "pl": "Postęp importu"
+                },
+                "type": "number",
+                "read": true,
+                "write": false,
+                "def": 0,
+                "unit": "%"
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.dataMigration.status",
+            "type": "state",
+            "common": {
+                "role": "text",
+                "name": {
+                    "en": "Import status",
+                    "de": "Import-Status",
+                    "pl": "Stan importu"
+                },
+                "type": "string",
+                "read": true,
+                "write": false,
+                "def": ""
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.dataMigration.points",
+            "type": "state",
+            "common": {
+                "role": "value",
+                "name": {
+                    "en": "Imported points",
+                    "de": "Importierte Punkte",
+                    "pl": "Zaimportowane punkty"
+                },
+                "type": "number",
+                "read": true,
+                "write": false,
+                "def": 0
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.dataMigration.errors",
+            "type": "state",
+            "common": {
+                "role": "value",
+                "name": {
+                    "en": "Points rejected during the import",
+                    "de": "Beim Import abgelehnte Punkte",
+                    "pl": "Punkty odrzucone podczas importu"
+                },
+                "type": "number",
+                "read": true,
+                "write": false,
+                "def": 0
+            },
+            "native": {}
+        },
+        {
+            "_id": "info.dataMigration.preview",
+            "type": "state",
+            "common": {
+                "role": "html",
+                "name": {
+                    "en": "Result of the last import preview",
+                    "de": "Ergebnis der letzten Import-Vorschau",
+                    "pl": "Wynik ostatniego podglądu importu"
+                },
+                "type": "string",
+                "read": true,
+                "write": false,
+                "def": ""
             },
             "native": {}
         }
