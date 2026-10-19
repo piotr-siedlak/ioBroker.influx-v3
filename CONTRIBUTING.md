@@ -17,8 +17,8 @@ npm run test:unit
 eval "$(scripts/influx3-test-server.sh start)" && npm run test:influx && npm run test:integration
 ```
 
-6. UI texts: add new keys to `admin/i18n/en.json`, `pl.json` and `de.json`; other languages can be generated with
-   `npm run translate` (needs a translation API key).
+6. UI texts: add every new key to all 11 files in `admin/i18n/` (`npm run translate` can fill missing languages,
+   it needs a translation API key). Every Admin control needs the sizes `xs, sm, md, lg, xl` (checker `E5507`).
 7. Add an entry under `### **WORK IN PROGRESS**` in the changelog of README.md.
 
 Commits follow the conventional style (`feat:`, `fix:`, `docs:`, `test:` …).

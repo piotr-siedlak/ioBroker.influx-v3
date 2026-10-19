@@ -11,7 +11,11 @@
                     "text": "hdr_server",
                     "size": 4,
                     "newLine": true,
-                    "sm": 12
+                    "sm": 12,
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 },
                 "edition": {
                     "type": "select",
@@ -38,7 +42,10 @@
                     ],
                     "newLine": true,
                     "sm": 12,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "url": {
                     "type": "text",
@@ -51,7 +58,10 @@
                     "maxLength": 2048,
                     "validator": "/^https?:\\/\\/[^\\s/]+/.test(data.url || '')",
                     "validatorErrorText": "err_url",
-                    "validatorNoSaveOnError": true
+                    "validatorNoSaveOnError": true,
+                    "xs": 12,
+                    "lg": 8,
+                    "xl": 8
                 },
                 "database": {
                     "type": "text",
@@ -65,7 +75,10 @@
                     "maxLength": 64,
                     "validator": "/^[A-Za-z0-9_-]{1,64}$/.test(data.database || '')",
                     "validatorErrorText": "err_db",
-                    "validatorNoSaveOnError": true
+                    "validatorNoSaveOnError": true,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "token": {
                     "type": "password",
@@ -74,7 +87,10 @@
                     "help": "tip_API token",
                     "sm": 12,
                     "md": 8,
-                    "visible": true
+                    "visible": true,
+                    "xs": 12,
+                    "lg": 8,
+                    "xl": 8
                 },
                 "tlsRejectUnauthorized": {
                     "type": "checkbox",
@@ -84,7 +100,10 @@
                     "newLine": true,
                     "sm": 12,
                     "md": 4,
-                    "hidden": "!(data.url || '').startsWith('https')"
+                    "hidden": "!(data.url || '').startsWith('https')",
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "tlsCa": {
                     "type": "text",
@@ -96,7 +115,10 @@
                     "placeholder": "-----BEGIN CERTIFICATE-----",
                     "sm": 12,
                     "md": 8,
-                    "hidden": "!(data.url || '').startsWith('https')"
+                    "hidden": "!(data.url || '').startsWith('https')",
+                    "xs": 12,
+                    "lg": 8,
+                    "xl": 8
                 },
                 "requestTimeoutMs": {
                     "type": "number",
@@ -109,7 +131,10 @@
                     "placeholder": "10000",
                     "newLine": true,
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "pingIntervalSec": {
                     "type": "number",
@@ -120,7 +145,10 @@
                     "max": 3600,
                     "placeholder": "60",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "_test": {
                     "type": "sendTo",
@@ -133,20 +161,31 @@
                     "md": 4,
                     "jsonData": "{\"config\": {\"url\": \"${data.url}\", \"database\": \"${data.database}\", \"token\": \"${data.token}\", \"edition\": \"${data.edition}\", \"tlsRejectUnauthorized\": ${data.tlsRejectUnauthorized}, \"requestTimeoutMs\": ${data.requestTimeoutMs}}}",
                     "timeout": 30000,
-                    "tooltip": "tip_Check connection"
+                    "tooltip": "tip_Check connection",
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "_noProxy": {
                     "type": "staticText",
                     "text": "txt_proxy",
                     "newLine": true,
-                    "sm": 12
+                    "sm": 12,
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 },
                 "_h2": {
                     "type": "header",
                     "text": "hdr_createdb",
                     "size": 5,
                     "newLine": true,
-                    "sm": 12
+                    "sm": 12,
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 },
                 "createDatabaseRetention": {
                     "type": "text",
@@ -159,7 +198,10 @@
                     "md": 4,
                     "validator": "!data.createDatabaseRetention || /^(none|(\\d+(h|d|w|mo|y))+)$/.test(data.createDatabaseRetention)",
                     "validatorErrorText": "err_retention",
-                    "validatorNoSaveOnError": true
+                    "validatorNoSaveOnError": true,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "_create": {
                     "type": "sendTo",
@@ -176,7 +218,10 @@
                         "ok": "Create",
                         "cancel": "Cancel"
                     },
-                    "hidden": "!_alive"
+                    "hidden": "!_alive",
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 }
             }
         },
@@ -201,7 +246,10 @@
                     ],
                     "newLine": true,
                     "sm": 12,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "flushIntervalMs": {
                     "type": "number",
@@ -214,7 +262,10 @@
                     "placeholder": "2000",
                     "sm": 6,
                     "md": 4,
-                    "hidden": "data.writeMode === 'direct'"
+                    "hidden": "data.writeMode === 'direct'",
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "batchMaxLines": {
                     "type": "number",
@@ -227,7 +278,10 @@
                     "newLine": true,
                     "sm": 6,
                     "md": 4,
-                    "hidden": "data.writeMode === 'direct'"
+                    "hidden": "data.writeMode === 'direct'",
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "batchMaxBytes": {
                     "type": "number",
@@ -239,7 +293,10 @@
                     "placeholder": "1048576",
                     "sm": 6,
                     "md": 4,
-                    "hidden": "data.writeMode === 'direct'"
+                    "hidden": "data.writeMode === 'direct'",
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "gzip": {
                     "type": "checkbox",
@@ -248,7 +305,10 @@
                     "help": "tip_Compress requests (gzip)",
                     "newLine": true,
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "noSync": {
                     "type": "checkbox",
@@ -257,7 +317,10 @@
                     "help": "tip_Fast acknowledgement (no_sync)",
                     "sm": 6,
                     "md": 4,
-                    "hidden": "data.edition === 'cloud'"
+                    "hidden": "data.edition === 'cloud'",
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "maxConcurrentWrites": {
                     "type": "number",
@@ -268,14 +331,21 @@
                     "max": 8,
                     "placeholder": "1",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "_h1": {
                     "type": "header",
                     "text": "hdr_retry",
                     "size": 5,
                     "newLine": true,
-                    "sm": 12
+                    "sm": 12,
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 },
                 "retryBaseDelayMs": {
                     "type": "number",
@@ -287,7 +357,10 @@
                     "placeholder": "1000",
                     "newLine": true,
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "retryMaxDelayMs": {
                     "type": "number",
@@ -298,7 +371,10 @@
                     "max": 3600000,
                     "placeholder": "60000",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "authRetryMs": {
                     "type": "number",
@@ -309,13 +385,20 @@
                     "max": 86400000,
                     "placeholder": "300000",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "_ms": {
                     "type": "staticText",
                     "text": "txt_precision",
                     "newLine": true,
-                    "sm": 12
+                    "sm": 12,
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 }
             }
         },
@@ -340,7 +423,10 @@
                     ],
                     "newLine": true,
                     "sm": 12,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "bufferMaxRecords": {
                     "type": "number",
@@ -352,7 +438,10 @@
                     "placeholder": "200000",
                     "newLine": true,
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "bufferMaxBytes": {
                     "type": "number",
@@ -363,7 +452,10 @@
                     "max": 1073741824,
                     "placeholder": "33554432",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "spoolMaxBytes": {
                     "type": "number",
@@ -374,7 +466,10 @@
                     "max": 53687091200,
                     "placeholder": "268435456",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "bufferMaxAgeHours": {
                     "type": "number",
@@ -386,7 +481,10 @@
                     "placeholder": "168",
                     "newLine": true,
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "overflowPolicy": {
                     "type": "select",
@@ -404,7 +502,10 @@
                         }
                     ],
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "persistOnShutdown": {
                     "type": "checkbox",
@@ -414,7 +515,10 @@
                     "newLine": true,
                     "sm": 6,
                     "md": 4,
-                    "hidden": "data.bufferMode === 'disk'"
+                    "hidden": "data.bufferMode === 'disk'",
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "spoolFsync": {
                     "type": "checkbox",
@@ -422,7 +526,10 @@
                     "tooltip": "tip_fsync disk buffer files",
                     "help": "tip_fsync disk buffer files",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "shutdownFlushTimeoutMs": {
                     "type": "number",
@@ -433,13 +540,20 @@
                     "max": 8000,
                     "placeholder": "5000",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "_g": {
                     "type": "staticText",
                     "text": "txt_guarantee",
                     "newLine": true,
-                    "sm": 12
+                    "sm": 12,
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 }
             }
         },
@@ -464,7 +578,10 @@
                     ],
                     "newLine": true,
                     "sm": 12,
-                    "md": 6
+                    "md": 6,
+                    "xs": 12,
+                    "lg": 6,
+                    "xl": 6
                 },
                 "_ps": {
                     "type": "staticText",
@@ -474,7 +591,11 @@
                     "hidden": "data.schemaMode !== 'perState'",
                     "style": {
                         "color": "orange"
-                    }
+                    },
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 },
                 "tableNumber": {
                     "type": "text",
@@ -486,7 +607,10 @@
                     "sm": 12,
                     "md": 4,
                     "maxLength": 255,
-                    "hidden": "data.schemaMode === 'perState'"
+                    "hidden": "data.schemaMode === 'perState'",
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "tableBoolean": {
                     "type": "text",
@@ -497,7 +621,10 @@
                     "sm": 12,
                     "md": 4,
                     "maxLength": 255,
-                    "hidden": "data.schemaMode === 'perState'"
+                    "hidden": "data.schemaMode === 'perState'",
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "tableString": {
                     "type": "text",
@@ -508,7 +635,10 @@
                     "sm": 12,
                     "md": 4,
                     "maxLength": 255,
-                    "hidden": "data.schemaMode === 'perState'"
+                    "hidden": "data.schemaMode === 'perState'",
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "tableRules": {
                     "type": "table",
@@ -583,7 +713,11 @@
                             "validatorErrorText": "err_table",
                             "validatorNoSaveOnError": true
                         }
-                    ]
+                    ],
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 },
                 "valueField": {
                     "type": "text",
@@ -597,7 +731,10 @@
                     "maxLength": 64,
                     "validator": "/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(data.valueField || '') && !['time','ack','q','from','state_id'].includes(data.valueField)",
                     "validatorErrorText": "err_field",
-                    "validatorNoSaveOnError": true
+                    "validatorNoSaveOnError": true,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "maxTables": {
                     "type": "number",
@@ -608,7 +745,10 @@
                     "max": 1000000,
                     "placeholder": "2000",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "maxColumns": {
                     "type": "number",
@@ -619,7 +759,10 @@
                     "max": 100000,
                     "placeholder": "500",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "maxStringLength": {
                     "type": "number",
@@ -631,7 +774,10 @@
                     "placeholder": "65536",
                     "newLine": true,
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "objectPolicy": {
                     "type": "select",
@@ -649,14 +795,21 @@
                         }
                     ],
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "_h1": {
                     "type": "header",
                     "text": "hdr_meta",
                     "size": 5,
                     "newLine": true,
-                    "sm": 12
+                    "sm": 12,
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 },
                 "metaAck": {
                     "type": "select",
@@ -678,7 +831,11 @@
                         }
                     ],
                     "newLine": true,
-                    "sm": 4
+                    "sm": 4,
+                    "xs": 12,
+                    "md": 4,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "metaQ": {
                     "type": "select",
@@ -699,7 +856,11 @@
                             "label": "opt_Not stored"
                         }
                     ],
-                    "sm": 4
+                    "sm": 4,
+                    "xs": 12,
+                    "md": 4,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "metaFrom": {
                     "type": "select",
@@ -720,13 +881,21 @@
                             "label": "opt_Tag"
                         }
                     ],
-                    "sm": 4
+                    "sm": 4,
+                    "xs": 12,
+                    "md": 4,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "_mw": {
                     "type": "staticText",
                     "text": "txt_meta_change",
                     "newLine": true,
-                    "sm": 12
+                    "sm": 12,
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 }
             }
         },
@@ -766,7 +935,11 @@
                             "validatorErrorText": "err_tagvalue",
                             "validatorNoSaveOnError": true
                         }
-                    ]
+                    ],
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 },
                 "tagKeyStyle": {
                     "type": "select",
@@ -785,65 +958,96 @@
                     ],
                     "newLine": true,
                     "sm": 12,
-                    "md": 6
+                    "md": 6,
+                    "xs": 12,
+                    "lg": 6,
+                    "xl": 6
                 },
                 "_h1": {
                     "type": "header",
                     "text": "hdr_auto",
                     "size": 5,
                     "newLine": true,
-                    "sm": 12
+                    "sm": 12,
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 },
                 "autoTagRoom": {
                     "type": "checkbox",
                     "label": "room (enum.rooms)",
                     "newLine": true,
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "autoTagFunction": {
                     "type": "checkbox",
                     "label": "function (enum.functions)",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "autoTagAdapter": {
                     "type": "checkbox",
                     "label": "adapter (e.g. hm-rpc)",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "autoTagInstance": {
                     "type": "checkbox",
                     "label": "instance (e.g. hm-rpc.0)",
                     "newLine": true,
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "autoTagDevice": {
                     "type": "checkbox",
                     "label": "device (name of parent device)",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "autoTagChannel": {
                     "type": "checkbox",
                     "label": "channel (name of parent channel)",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "autoTagUnit": {
                     "type": "checkbox",
                     "label": "unit (common.unit)",
                     "newLine": true,
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "autoTagRole": {
                     "type": "checkbox",
                     "label": "role (common.role)",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "autoTagName": {
                     "type": "checkbox",
@@ -851,7 +1055,10 @@
                     "tooltip": "tip_name (common.name)",
                     "help": "tip_name (common.name)",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "nativeAllowlist": {
                     "type": "text",
@@ -861,14 +1068,21 @@
                     "placeholder": "serial, model",
                     "newLine": true,
                     "sm": 12,
-                    "md": 6
+                    "md": 6,
+                    "xs": 12,
+                    "lg": 6,
+                    "xl": 6
                 },
                 "_h2": {
                     "type": "header",
                     "text": "hdr_tagsafety",
                     "size": 5,
                     "newLine": true,
-                    "sm": 12
+                    "sm": 12,
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 },
                 "maxTagValuesPerKey": {
                     "type": "number",
@@ -880,7 +1094,10 @@
                     "placeholder": "1000",
                     "newLine": true,
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "maxTagValueLength": {
                     "type": "number",
@@ -891,7 +1108,10 @@
                     "max": 4096,
                     "placeholder": "256",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "blockSensitiveTags": {
                     "type": "checkbox",
@@ -899,14 +1119,21 @@
                     "tooltip": "tip_Block secrets in tags",
                     "help": "tip_Block secrets in tags",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "_h3": {
                     "type": "header",
                     "text": "hdr_dynamic",
                     "size": 5,
                     "newLine": true,
-                    "sm": 12
+                    "sm": 12,
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 },
                 "dynamicTagsEnabled": {
                     "type": "checkbox",
@@ -915,7 +1142,10 @@
                     "help": "tip_Enable dynamic tags {state:<id>}",
                     "newLine": true,
                     "sm": 12,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "dynamicTagTtlSec": {
                     "type": "number",
@@ -927,7 +1157,10 @@
                     "placeholder": "3600",
                     "sm": 6,
                     "md": 4,
-                    "hidden": "!data.dynamicTagsEnabled"
+                    "hidden": "!data.dynamicTagsEnabled",
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "dynamicTagMaxValues": {
                     "type": "number",
@@ -939,13 +1172,20 @@
                     "placeholder": "100",
                     "sm": 6,
                     "md": 4,
-                    "hidden": "!data.dynamicTagsEnabled"
+                    "hidden": "!data.dynamicTagsEnabled",
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "_tpl": {
                     "type": "staticText",
                     "text": "txt_templates",
                     "newLine": true,
-                    "sm": 12
+                    "sm": 12,
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 }
             }
         },
@@ -957,7 +1197,11 @@
                     "type": "staticText",
                     "text": "txt_defaults",
                     "newLine": true,
-                    "sm": 12
+                    "sm": 12,
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 },
                 "changesOnly": {
                     "type": "checkbox",
@@ -966,7 +1210,10 @@
                     "help": "tip_Log changes only",
                     "newLine": true,
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "debounceTime": {
                     "type": "number",
@@ -977,7 +1224,10 @@
                     "max": 86400000,
                     "placeholder": "0",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "blockTime": {
                     "type": "number",
@@ -988,7 +1238,10 @@
                     "max": 86400000,
                     "placeholder": "0",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "changesRelogInterval": {
                     "type": "number",
@@ -1000,7 +1253,10 @@
                     "placeholder": "0",
                     "newLine": true,
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "changesMinDelta": {
                     "type": "number",
@@ -1011,7 +1267,10 @@
                     "step": 0.001,
                     "placeholder": "0",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "round": {
                     "type": "text",
@@ -1023,7 +1282,10 @@
                     "md": 4,
                     "validator": "(data.round === undefined || data.round === null || String(data.round) === '') || /^(1[0-5]|[0-9])$/.test(String(data.round))",
                     "validatorErrorText": "err_round",
-                    "validatorNoSaveOnError": true
+                    "validatorNoSaveOnError": true,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "storeOnStart": {
                     "type": "checkbox",
@@ -1032,7 +1294,10 @@
                     "help": "tip_Write current value on start",
                     "newLine": true,
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "logSkippedBeforeChange": {
                     "type": "checkbox",
@@ -1040,7 +1305,10 @@
                     "tooltip": "tip_Write last skipped value before a change",
                     "help": "tip_Write last skipped value before a change",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "ackFilter": {
                     "type": "select",
@@ -1063,7 +1331,10 @@
                     ],
                     "newLine": true,
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "qFilter": {
                     "type": "select",
@@ -1081,7 +1352,10 @@
                         }
                     ],
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "storeAck": {
                     "type": "checkbox",
@@ -1089,21 +1363,33 @@
                     "tooltip": "tip_Store ack",
                     "help": "tip_Store ack",
                     "newLine": true,
-                    "sm": 4
+                    "sm": 4,
+                    "xs": 12,
+                    "md": 4,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "storeQ": {
                     "type": "checkbox",
                     "label": "Store q",
                     "tooltip": "tip_Store q",
                     "help": "tip_Store q",
-                    "sm": 4
+                    "sm": 4,
+                    "xs": 12,
+                    "md": 4,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "storeFrom": {
                     "type": "checkbox",
                     "label": "Store from",
                     "tooltip": "tip_Store from",
                     "help": "tip_Store from",
-                    "sm": 4
+                    "sm": 4,
+                    "xs": 12,
+                    "md": 4,
+                    "lg": 4,
+                    "xl": 4
                 }
             }
         },
@@ -1121,7 +1407,10 @@
                     "placeholder": "2000",
                     "newLine": true,
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "historyHardLimit": {
                     "type": "number",
@@ -1132,7 +1421,10 @@
                     "max": 1000000,
                     "placeholder": "100000",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "defaultAggregate": {
                     "type": "select",
@@ -1170,7 +1462,10 @@
                         }
                     ],
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "queryTimeoutMs": {
                     "type": "number",
@@ -1182,7 +1477,10 @@
                     "placeholder": "30000",
                     "newLine": true,
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "queryMaxRows": {
                     "type": "number",
@@ -1193,7 +1491,10 @@
                     "max": 1000000,
                     "placeholder": "10000",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "queryMaxBytes": {
                     "type": "number",
@@ -1204,7 +1505,10 @@
                     "max": 536870912,
                     "placeholder": "10485760",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "allowUserQueries": {
                     "type": "checkbox",
@@ -1213,7 +1517,10 @@
                     "help": "tip_Allow SQL/InfluxQL queries via sendTo",
                     "newLine": true,
                     "sm": 12,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "querySenders": {
                     "type": "text",
@@ -1223,7 +1530,10 @@
                     "placeholder": "admin, javascript.0",
                     "sm": 12,
                     "md": 8,
-                    "hidden": "!data.allowUserQueries"
+                    "hidden": "!data.allowUserQueries",
+                    "xs": 12,
+                    "lg": 8,
+                    "xl": 8
                 }
             }
         },
@@ -1241,7 +1551,10 @@
                     "placeholder": "20",
                     "newLine": true,
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "logRejectedLimitPerMin": {
                     "type": "number",
@@ -1252,7 +1565,10 @@
                     "max": 10000,
                     "placeholder": "10",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "statsIntervalSec": {
                     "type": "number",
@@ -1263,7 +1579,10 @@
                     "max": 3600,
                     "placeholder": "10",
                     "sm": 6,
-                    "md": 4
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "writeStatsToInflux": {
                     "type": "checkbox",
@@ -1271,7 +1590,11 @@
                     "tooltip": "tip_Write adapter statistics into InfluxDB (experimental)",
                     "help": "tip_Write adapter statistics into InfluxDB (experimental)",
                     "newLine": true,
-                    "sm": 12
+                    "sm": 12,
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 }
             }
         },
@@ -1287,7 +1610,11 @@
                     "newLine": true,
                     "sm": 12,
                     "label": "Diagnostics",
-                    "hidden": "!_alive"
+                    "hidden": "!_alive",
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 },
                 "_refresh": {
                     "type": "sendTo",
@@ -1297,7 +1624,10 @@
                     "newLine": true,
                     "sm": 6,
                     "md": 4,
-                    "hidden": "!_alive"
+                    "hidden": "!_alive",
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "_flush": {
                     "type": "sendTo",
@@ -1307,14 +1637,21 @@
                     "showProcess": true,
                     "sm": 6,
                     "md": 4,
-                    "hidden": "!_alive"
+                    "hidden": "!_alive",
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "_notalive": {
                     "type": "staticText",
                     "text": "txt_notalive",
                     "newLine": true,
                     "sm": 12,
-                    "hidden": "_alive"
+                    "hidden": "_alive",
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 }
             }
         },
@@ -1326,7 +1663,11 @@
                     "type": "staticText",
                     "text": "txt_migration",
                     "newLine": true,
-                    "sm": 12
+                    "sm": 12,
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 },
                 "migrationSource": {
                     "type": "selectSendTo",
@@ -1337,7 +1678,10 @@
                     "newLine": true,
                     "sm": 12,
                     "md": 4,
-                    "hidden": "!_alive"
+                    "hidden": "!_alive",
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "migrationOverwrite": {
                     "type": "checkbox",
@@ -1346,7 +1690,10 @@
                     "help": "tip_Overwrite existing settings of this instance",
                     "sm": 12,
                     "md": 4,
-                    "hidden": "!_alive"
+                    "hidden": "!_alive",
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "_preview": {
                     "type": "sendTo",
@@ -1358,7 +1705,10 @@
                     "sm": 6,
                     "md": 3,
                     "hidden": "!_alive || !data.migrationSource",
-                    "jsonData": "{\"source\": \"${data.migrationSource}\", \"overwrite\": ${!!data.migrationOverwrite}}"
+                    "jsonData": "{\"source\": \"${data.migrationSource}\", \"overwrite\": ${!!data.migrationOverwrite}}",
+                    "xs": 12,
+                    "lg": 3,
+                    "xl": 3
                 },
                 "_apply": {
                     "type": "sendTo",
@@ -1375,7 +1725,10 @@
                         "title": "Apply",
                         "ok": "Apply",
                         "cancel": "Cancel"
-                    }
+                    },
+                    "xs": 12,
+                    "lg": 3,
+                    "xl": 3
                 }
             }
         }

@@ -27,7 +27,7 @@ its instances or settings.
 * Buffer in memory (saved on shutdown) or on disk (write-ahead, survives `kill -9`)
 * `getHistory` for ioBroker charts (raw, average, min, max, min/max, sum, count, percentile, quantile — computed in
   InfluxDB with `date_bin`), read-only SQL and InfluxQL via `sendTo`
-* Admin UI (JSON Config) in English, Polish and German, connection test, mapping preview, diagnostics,
+* Admin UI (JSON Config) in all 11 ioBroker languages (incl. English, Polish, German), connection test, mapping preview, diagnostics,
   migration wizard for `influxdb` settings
 * Multiple instances with different servers/databases
 
@@ -244,7 +244,7 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 * (Piotr Siedlak) Initial version: per-state logging to InfluxDB 3 Core/Enterprise, grouped and per-state tables,
   layered tags with templates and protection, memory/disk buffer, getHistory with server-side aggregation,
-  read-only SQL/InfluxQL, Admin UI (en/pl/de), migration from influxdb settings
+  read-only SQL/InfluxQL, Admin UI in 11 languages, migration from influxdb settings
 
 ## License
 

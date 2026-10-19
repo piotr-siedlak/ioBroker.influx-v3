@@ -27,7 +27,7 @@ awarie oraz odczytem historii i zapytaniami SQL. Jest to **niezależny** adapter
 * Bufor w pamięci (zapisywany przy zatrzymaniu) lub na dysku (zapis przed wysłaniem, przetrwa `kill -9`)
 * `getHistory` dla wykresów ioBrokera (surowe, średnia, min, max, min/max, suma, liczba, percentyl, kwantyl —
   liczone w InfluxDB przez `date_bin`), zapytania SQL i InfluxQL tylko do odczytu przez `sendTo`
-* Interfejs Admin (JSON Config) po polsku, angielsku i niemiecku, test połączenia, podgląd mapowania,
+* Interfejs Admin (JSON Config) we wszystkich 11 językach ioBrokera (m.in. polski, angielski, niemiecki), test połączenia, podgląd mapowania,
   diagnostyka, kreator migracji ustawień z `influxdb`
 * Wiele instancji z różnymi serwerami/bazami
 

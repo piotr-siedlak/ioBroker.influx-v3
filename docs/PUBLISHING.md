@@ -8,8 +8,10 @@ owner's decision and credentials.
 Done in code: the adapter is named **`influx-v3`** (npm `iobroker.influx-v3`); the checker rejects `_` in new
 adapter names (`[E4021]`, see [RESEARCH.md §8](RESEARCH.md#8-naming-analysis)).
 
-Still to do **before the first push**: rename the GitHub repository `piotr-siedlak/iobroker-influx_v3` to
-`ioBroker.influx-v3` (*Settings → Repository name*; GitHub redirects the old URL). `package.json` and
+Still to do **before the first push**: the GitHub repository is currently `piotr-siedlak/iobroker-influx-v3`
+(renamed from `iobroker-influx_v3` on 2026-10-19). The checker requires the exact form `ioBroker.<adapter>` — prefix
+`ioBroker` with capital **B** followed by a **dot** (`E0002`: `/^iobroker\./i`, `E0003`: capital B) — so it has to be
+renamed once more to `ioBroker.influx-v3` (*Settings → Repository name*; GitHub redirects the old URLs). `package.json` and
 `io-package.json` already point to `https://github.com/piotr-siedlak/ioBroker.influx-v3`; the checker compares them
 with the repository's clone URL (`E0019`) and requires the `ioBroker.` prefix (`E0002`/`E0003`).
 
@@ -27,12 +29,17 @@ with the repository's clone URL (`E0019`) and requires the `ioBroker.` prefix (`
 npx @iobroker/repochecker https://github.com/<owner>/ioBroker.influx-v3
 ```
 
-Expected remaining items before publication: npm package missing (`E2000`), not in the repository list (`W4001`).
+Status of a local run (2026-10-19, checker 5.23.2 in `--local` mode against the still empty, not yet renamed
+repository): no findings for package.json/io-package.json contents, Admin JSON Config, i18n, README, license or
+Dependabot. Open items, all on the owner side: repository name/URL (`E0002`, `E0004`, `E0007`, `E0019`), external
+icon reachable only after the push (`E1025`), About text and topics (`E8001`, `E8002`), first CI run (`W3039`),
+npm package (`E2000`), repository listing (`W4001`). `E4031`/`E4033` appeared only because
+`download.iobroker.net` was not reachable from the test environment.
 
 ## 4. Translations
 
-`admin/i18n/{en,pl,de}.json` are translated; `ru, pt, nl, fr, it, es, uk, zh-cn` currently contain English texts
-(checker warning `W5606`). Run `npm run translate` (needs a DeepL/Google key) or translate manually.
+Done: all 11 languages are translated (no `W5603`/`W5604`/`W5606`). Native speakers are welcome to review the
+machine-independent but non-native translations of `ru, pt, nl, fr, it, es, uk, zh-cn`.
 
 ## 5. npm release (trusted publishing)
 

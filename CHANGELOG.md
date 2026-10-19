@@ -17,6 +17,6 @@ README.md (required by the ioBroker release script).
   overflow policies; memory buffer persisted on shutdown or crash-safe disk buffer
 * `getHistory` with server-side aggregation (`date_bin`, selectors, percentiles), read-only SQL/InfluxQL,
   `enableHistory`/`disableHistory`/`getEnabledDPs`, `storeState`, diagnostics, mapping preview
-* Admin JSON Config (10 tabs) and per-state dialog, translations en/pl/de (other languages fall back to English)
+* Admin JSON Config (10 tabs) and per-state dialog, translated into all 11 ioBroker languages (en, de, ru, pt, nl, fr, it, es, pl, uk, zh-cn)
 * Migration wizard for settings of `ioBroker.influxdb` (explicit, previewable, source untouched)
 * Experimental write-only support for InfluxDB Cloud via `/api/v2/write`
