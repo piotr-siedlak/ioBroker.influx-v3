@@ -45,6 +45,17 @@ export interface LegacyPoint {
     tags: Record<string, string>;
 }
 
+/** One tag value stored in the old points */
+export interface LegacyTagUse {
+    key: string;
+    value: string;
+    /** number of measurements (states) containing it; undefined when the server cannot tell cheaply (2.x) */
+    measurements?: number;
+}
+
+/** maximum number of values read per tag key */
+export const MAX_TAG_VALUES = 5000;
+
 export type LegacyErrorKind = 'tooBig' | 'auth' | 'notFound' | 'query' | 'transport';
 
 export class LegacyReadError extends Error {
@@ -67,6 +78,8 @@ export interface LegacyReader {
     read(measurement: string, from: number, to: number): Promise<LegacyPoint[]>;
     /** names of the measurements (up to `limit`) */
     listMeasurements(limit: number): Promise<string[]>;
+    /** all custom tag keys and values stored in the points (without ack/q/from) */
+    tagInventory(): Promise<LegacyTagUse[]>;
     close(): void;
 }
 
@@ -580,6 +593,7 @@ abstract class HttpReader implements LegacyReader {
     abstract timeRange(measurement: string): Promise<{ first?: number; last?: number }>;
     abstract read(measurement: string, from: number, to: number): Promise<LegacyPoint[]>;
     abstract listMeasurements(limit: number): Promise<string[]>;
+    abstract tagInventory(): Promise<LegacyTagUse[]>;
 
     close(): void {
         this.http.close();
@@ -645,6 +659,42 @@ export class InfluxDB1Reader extends HttpReader {
         const [series] = await this.query(`SHOW MEASUREMENTS LIMIT ${Math.max(1, Math.floor(limit))}`);
         return (series?.[0]?.values ?? []).map(v => String(v[0]));
     }
+
+    async tagInventory(): Promise<LegacyTagUse[]> {
+        // one series per measurement with rows [key, value]
+        const [series] = await this.query('SHOW TAG VALUES WITH KEY =~ /.+/');
+        return countTagUses(
+            (series ?? []).flatMap(s => (s.values ?? []).map(v => ({ key: String(v[0]), value: String(v[1]) }))),
+        );
+    }
+}
+
+/**
+ * Counts tag uses (one entry per measurement and value), drops metadata keys and caps the values per key.
+ *
+ * @param rows key/value per measurement
+ */
+export function countTagUses(rows: { key: string; value: string }[]): LegacyTagUse[] {
+    const counts = new Map<string, LegacyTagUse>();
+    const perKey = new Map<string, number>();
+    for (const r of rows) {
+        if (!r.key || r.key.startsWith('_') || META.has(r.key) || r.value === '') {
+            continue;
+        }
+        const id = `${r.key}\u0000${r.value}`;
+        const e = counts.get(id);
+        if (e) {
+            e.measurements = (e.measurements ?? 0) + 1;
+            continue;
+        }
+        const n = perKey.get(r.key) ?? 0;
+        if (n >= MAX_TAG_VALUES) {
+            continue;
+        }
+        perKey.set(r.key, n + 1);
+        counts.set(id, { key: r.key, value: r.value, measurements: 1 });
+    }
+    return [...counts.values()];
 }
 
 /** InfluxDB 2.x (Flux over `/api/v2/query`, annotated CSV) */
@@ -686,6 +736,36 @@ export class InfluxDB2Reader extends HttpReader {
 
     async read(measurement: string, from: number, to: number): Promise<LegacyPoint[]> {
         return fluxTablesToPoints(await this.flux(buildFluxRead(this.cfg.bucket, measurement, from, to)));
+    }
+
+    async tagInventory(): Promise<LegacyTagUse[]> {
+        const range = `start: time(v: "${FAR_PAST}"), stop: time(v: "${FAR_FUTURE}")`;
+        const schemaImport = `import ${quoteFluxString('influxdata/influxdb/schema')}`;
+        const keys: string[] = [];
+        for (const t of await this.flux(
+            `${schemaImport}\nschema.tagKeys(bucket: ${quoteFluxString(this.cfg.bucket)}, ${range})`,
+        )) {
+            const idx = t.columns.indexOf('_value');
+            for (const row of t.rows) {
+                const k = row[idx];
+                if (k && !k.startsWith('_') && !META.has(k) && !keys.includes(k)) {
+                    keys.push(k);
+                }
+            }
+        }
+        const out: LegacyTagUse[] = [];
+        for (const key of keys) {
+            const q = `${schemaImport}\nschema.tagValues(bucket: ${quoteFluxString(this.cfg.bucket)}, tag: ${quoteFluxString(key)}, ${range})\n  |> limit(n: ${MAX_TAG_VALUES})`;
+            for (const t of await this.flux(q)) {
+                const idx = t.columns.indexOf('_value');
+                for (const row of t.rows) {
+                    if (row[idx]) {
+                        out.push({ key, value: row[idx] });
+                    }
+                }
+            }
+        }
+        return out;
     }
 
     async listMeasurements(limit: number): Promise<string[]> {

@@ -1,6 +1,16 @@
 import { strict as assert } from 'node:assert';
 import { parseTagDefinitions } from '../../src/lib/config';
-import { applyTagRules, buildOldTagInventory, parseTagRules } from '../../src/lib/tagMapping';
+import {
+    addToInventory,
+    applyTagRules,
+    buildOldTagInventory,
+    describeUse,
+    mergeInventories,
+    parseTagRules,
+    ruleToRow,
+    suggestTagRules,
+} from '../../src/lib/tagMapping';
+import { countTagUses } from '../../src/lib/legacySource';
 import {
     keyGroup,
     proposeStandard,
@@ -169,7 +179,7 @@ describe('proposed standard for old tags (tagStandard)', () => {
         assert.deepEqual(p.catalogRows, [
             { ...catalogRows[0], values: 'KOTLOWNIA, SALON, GARAZ, KUCHE' },
             { ...catalogRows[1], values: '1, 2, -1' },
-            catalogRows[2],
+            { ...catalogRows[2], values: 'zigbee' }, // open list: used values are listed too
         ]);
         const rules = p.ruleRows as { fromKey: string; fromValue: string[]; toKey: string; toValue: string }[];
         assert.ok(rules.some(r => r.fromKey === 'room' && r.fromValue.length === 0 && r.toKey === 'Location'));
@@ -211,7 +221,13 @@ describe('proposed standard for old tags (tagStandard)', () => {
         assert.deepEqual(
             p.catalogRows.map(r => [r.key, r.allowOther, r.values]),
             [
-                ['serial', true, ''],
+                [
+                    'serial',
+                    true,
+                    Array.from({ length: 30 }, (_, i) => `SN-${i}`)
+                        .sort()
+                        .join(', '),
+                ],
                 ['value_tag', false, 'X'],
             ],
         );
@@ -223,5 +239,105 @@ describe('proposed standard for old tags (tagStandard)', () => {
         assert.match(String(lower.catalogRows[0].values), /^kotlownia, garaz, heizungsraum|^kotlownia, garaz/);
         const used = proposeStandard(inv, input({ valueStyle: 'asUsed', rooms: [] }));
         assert.equal(String(used.catalogRows[0].values).split(', ')[0], 'Kotłownia');
+    });
+
+    describe('every used tag is covered (extension 3)', () => {
+        it('rows left empty by "take over old tags" are completed in place, not skipped', () => {
+            const catalogRows = [
+                { key: 'Location', values: 'KOTLOWNIA, SALON', allowOther: false, defaultValue: '', description: '' },
+            ];
+            const catalog = parseTagDefinitions(catalogRows, 'snake', 'value', []);
+            const taken = suggestTagRules(inv, [], catalog, 'snake').map(ruleToRow);
+            assert.ok(
+                taken.some(r => r.fromKey === 'floor' && r.toKey === ''),
+                'placeholder present',
+            );
+            const p = proposeStandard(inv, input({ catalogRows, ruleRows: taken, rooms: [] }));
+            const rows = p.ruleRows as { fromKey: string; fromValue: string[]; toKey: string; toValue: string }[];
+            assert.ok(p.completedRows >= 2);
+            assert.ok(!rows.some(r => r.toKey === '' && r.toValue === ''), JSON.stringify(rows));
+            assert.equal(rows.find(r => r.fromKey === 'floor' && !r.fromValue.length)?.toKey, 'floor');
+            assert.equal(p.coverage.uncovered.length, 0, p.coverage.uncovered.join('\n'));
+            assert.equal(p.coverage.covered, p.coverage.total);
+        });
+
+        it('a placeholder with old values needing different standard values is split', () => {
+            const catalogRows = [
+                { key: 'Location', values: 'KOTLOWNIA, SALON', allowOther: false, defaultValue: '', description: '' },
+            ];
+            const ruleRows = [{ fromKey: 'room', fromValue: ['Kotłownia', 'Garaż'], toKey: 'Location', toValue: '' }];
+            const p = proposeStandard(inv, input({ catalogRows, ruleRows, rooms: [] }));
+            const rows = p.ruleRows as { fromKey: string; fromValue: string[]; toKey: string; toValue: string }[];
+            assert.deepEqual(rows.slice(0, 2), [
+                { fromKey: 'room', fromValue: ['Kotłownia'], toKey: 'Location', toValue: 'KOTLOWNIA' },
+                { fromKey: 'room', fromValue: ['Garaż'], toKey: 'Location', toValue: 'GARAZ' },
+            ]);
+            assert.equal(p.coverage.uncovered.length, 0, p.coverage.uncovered.join('\n'));
+        });
+
+        it('open lists: spelling variants are merged and the used values are listed', () => {
+            const devices = buildOldTagInventory([
+                [{ key: 'device', value: 'Pump 1' }],
+                [{ key: 'device', value: 'Pump 1' }],
+                [{ key: 'Gerät', value: 'pump 1' }],
+                [{ key: 'device', value: 'Boiler' }],
+            ]);
+            const catalogRows = [{ key: 'device', values: '', allowOther: true, defaultValue: '', description: '' }];
+            const p = proposeStandard(devices, input({ catalogRows }));
+            assert.equal(p.catalogRows[0].values, 'Pump 1, Boiler');
+            // case-only variants need no rule of their own: the catalog spelling is applied automatically
+            assert.deepEqual(p.ruleRows, [{ fromKey: 'Gerät', fromValue: [], toKey: 'device', toValue: '' }]);
+            const cat = parseTagDefinitions(p.catalogRows, 'snake', 'value', []);
+            assert.deepEqual(
+                applyTagRules([{ key: 'Gerät', value: 'pump 1' }], parseTagRules(p.ruleRows), cat, 'snake').tags,
+                [{ key: 'device', value: 'Pump 1' }],
+            );
+            assert.deepEqual(p.coverage, { total: 3, covered: 3, removed: 0, uncovered: [] });
+        });
+
+        it('coverage counts removed tags and reports what a user rule leaves invalid', () => {
+            const catalogRows = [
+                { key: 'Location', values: 'KOTLOWNIA, SALON', allowOther: false, defaultValue: '', description: '' },
+            ];
+            const ruleRows = [
+                { fromKey: 'source', fromValue: [], toKey: '-', toValue: '' },
+                { fromKey: 'room', fromValue: ['Garaż'], toKey: 'Location', toValue: 'NOPE' },
+            ];
+            const p = proposeStandard(inv, input({ catalogRows, ruleRows, rooms: [] }));
+            assert.equal(p.coverage.removed, 1);
+            assert.deepEqual(p.coverage.uncovered, [
+                'room=Garaż: value "NOPE" is not allowed for "Location" (allowed: KOTLOWNIA, SALON, KUCHE)',
+            ]);
+            assert.equal(p.coverage.covered + p.coverage.removed + p.coverage.uncovered.length, p.coverage.total);
+        });
+
+        it('tags of old points and of this instance join the inventory with their origin', () => {
+            const points = { keys: new Map() };
+            for (const u of countTagUses([
+                { key: 'room', value: 'Spiżarnia' },
+                { key: 'room', value: 'Spiżarnia' },
+                { key: 'ack', value: 'true' },
+                { key: '_field', value: 'value' },
+            ])) {
+                addToInventory(points, u.key, u.value, u.measurements ?? 0, 'points');
+            }
+            const own = buildOldTagInventory([[{ key: 'Location', value: 'kotlownia' }]], 'instance');
+            const all = mergeInventories(inv, points, own);
+            const room = all.keys.get('room')!;
+            assert.equal(room.values.get('Spiżarnia'), 0);
+            assert.equal(room.points.get('Spiżarnia'), 2);
+            assert.equal(describeUse(room, 'Spiżarnia'), '2 old measurement(s)');
+            assert.equal(describeUse(room, 'Kotłownia'), '2 state(s)');
+            assert.ok(!all.keys.has('ack') && !all.keys.has('_field'));
+            assert.deepEqual([...all.keys.get('location')!.origins.get('kotlownia')!], ['instance']);
+            const p = proposeStandard(all, input());
+            assert.ok(
+                p.summary.some(
+                    l => /Spiżarnia → SPIZARNIA/.test(l) || /SPIZARNIA/.test(String(p.catalogRows[0].values)),
+                ),
+                p.summary.join('\n'),
+            );
+            assert.equal(p.coverage.uncovered.length, 0, p.coverage.uncovered.join('\n'));
+        });
     });
 });

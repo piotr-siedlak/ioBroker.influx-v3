@@ -1750,13 +1750,38 @@
                 },
                 "_standardInfo": {
                     "type": "staticText",
-                    "text": "txt_propose_standard",
+                    "text": "txt_propose_standard_all",
                     "newLine": true,
                     "sm": 12,
                     "xs": 12,
                     "md": 12,
                     "lg": 12,
                     "xl": 12
+                },
+                "migrationIncludeOldPoints": {
+                    "type": "checkbox",
+                    "label": "Also use tags stored in the old database",
+                    "tooltip": "tip_Also use tags stored in the old database",
+                    "help": "tip_Also use tags stored in the old database",
+                    "default": true,
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 6,
+                    "xs": 12,
+                    "lg": 6,
+                    "xl": 6
+                },
+                "migrationStandardizeExisting": {
+                    "type": "checkbox",
+                    "label": "Apply also standardises the tags of states already configured for this instance",
+                    "tooltip": "tip_Apply also standardises the tags of states already configured for this instance",
+                    "help": "tip_Apply also standardises the tags of states already configured for this instance",
+                    "default": true,
+                    "sm": 12,
+                    "md": 6,
+                    "xs": 12,
+                    "lg": 6,
+                    "xl": 6
                 },
                 "migrationValueStyle": {
                     "type": "select",
@@ -1812,7 +1837,7 @@
                     "md": 4,
                     "hidden": "!_alive",
                     "label": "Propose standard (catalog + rules)",
-                    "jsonData": "{\"source\": ${JSON.stringify(data.migrationSource || '')}, \"rules\": ${JSON.stringify(data.migrationTagRules || [])}, \"catalog\": ${JSON.stringify(data.tagDefinitions || [])}, \"valueStyle\": ${JSON.stringify(data.migrationValueStyle || 'auto')}, \"useEnums\": ${data.migrationUseEnums !== false}}",
+                    "jsonData": "{\"source\": ${JSON.stringify(data.migrationSource || '')}, \"rules\": ${JSON.stringify(data.migrationTagRules || [])}, \"catalog\": ${JSON.stringify(data.tagDefinitions || [])}, \"valueStyle\": ${JSON.stringify(data.migrationValueStyle || 'auto')}, \"useEnums\": ${data.migrationUseEnums !== false}, \"includeOldPoints\": ${data.migrationIncludeOldPoints !== false}}",
                     "result": {
                         "standardProposed": "res_standard_proposed",
                         "standardNothing": "res_standard_nothing",
@@ -1832,7 +1857,7 @@
                     "md": 4,
                     "hidden": "!_alive",
                     "label": "Take over old tags",
-                    "jsonData": "{\"source\": ${JSON.stringify(data.migrationSource || '')}, \"rules\": ${JSON.stringify(data.migrationTagRules || [])}, \"catalog\": ${JSON.stringify(data.tagDefinitions || [])}}",
+                    "jsonData": "{\"source\": ${JSON.stringify(data.migrationSource || '')}, \"rules\": ${JSON.stringify(data.migrationTagRules || [])}, \"catalog\": ${JSON.stringify(data.tagDefinitions || [])}, \"includeOldPoints\": ${data.migrationIncludeOldPoints !== false}}",
                     "result": {
                         "rulesAdded": "res_rules_added",
                         "rulesNone": "res_rules_none",
@@ -1858,7 +1883,7 @@
                             "noTranslation": true,
                             "title": "Old key",
                             "command": "getOldTagKeys",
-                            "jsonData": "{\"source\": ${JSON.stringify(globalData.migrationSource || '')}}",
+                            "jsonData": "{\"source\": ${JSON.stringify(globalData.migrationSource || '')}, \"includeOldPoints\": ${globalData.migrationIncludeOldPoints !== false}}",
                             "validator": "!!(data.fromKey || '').trim() || ((Array.isArray(data.fromValue) ? !data.fromValue.length : !data.fromValue) && !data.toKey && !data.toValue)",
                             "validatorErrorText": "err_old_key_missing",
                             "validatorNoSaveOnError": true
@@ -1872,7 +1897,7 @@
                             "noTranslation": true,
                             "title": "Old values (none = every value)",
                             "command": "getOldTagValues",
-                            "jsonData": "{\"source\": ${JSON.stringify(globalData.migrationSource || '')}, \"key\": ${JSON.stringify(data.fromKey || '')}}",
+                            "jsonData": "{\"source\": ${JSON.stringify(globalData.migrationSource || '')}, \"key\": ${JSON.stringify(data.fromKey || '')}, \"includeOldPoints\": ${globalData.migrationIncludeOldPoints !== false}}",
                             "alsoDependsOn": [
                                 "fromKey"
                             ]
@@ -1916,12 +1941,13 @@
                     "newLine": true,
                     "sm": 12,
                     "label": "Preview of the migration (nothing is changed)",
-                    "jsonData": "{\"source\": \"${data.migrationSource}\", \"overwrite\": ${!!data.migrationOverwrite}, \"rules\": ${JSON.stringify(data.migrationTagRules || [])}, \"catalog\": ${JSON.stringify(data.tagDefinitions || [])}}",
+                    "jsonData": "{\"source\": \"${data.migrationSource}\", \"overwrite\": ${!!data.migrationOverwrite}, \"rules\": ${JSON.stringify(data.migrationTagRules || [])}, \"catalog\": ${JSON.stringify(data.tagDefinitions || [])}, \"standardizeExisting\": ${data.migrationStandardizeExisting !== false}}",
                     "alsoDependsOn": [
                         "migrationSource",
                         "migrationOverwrite",
                         "migrationTagRules",
-                        "tagDefinitions"
+                        "tagDefinitions",
+                        "migrationStandardizeExisting"
                     ],
                     "hidden": "!_alive || !data.migrationSource",
                     "xs": 12,
@@ -1954,7 +1980,7 @@
                     "md": 3,
                     "hidden": "!_alive || !data.migrationSource",
                     "disabled": "JSON.stringify(data.tagDefinitions || []) !== JSON.stringify(originalData.tagDefinitions || [])",
-                    "jsonData": "{\"source\": \"${data.migrationSource}\", \"overwrite\": ${!!data.migrationOverwrite}, \"rules\": ${JSON.stringify(data.migrationTagRules || [])}, \"catalog\": ${JSON.stringify(data.tagDefinitions || [])}}",
+                    "jsonData": "{\"source\": \"${data.migrationSource}\", \"overwrite\": ${!!data.migrationOverwrite}, \"rules\": ${JSON.stringify(data.migrationTagRules || [])}, \"catalog\": ${JSON.stringify(data.tagDefinitions || [])}, \"standardizeExisting\": ${data.migrationStandardizeExisting !== false}}",
                     "confirm": {
                         "text": "confirm_migration_rules",
                         "title": "Apply",

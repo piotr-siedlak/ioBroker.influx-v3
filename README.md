@@ -244,13 +244,18 @@ suggestion get a row with an empty new value. Existing rows are never changed �
 keys to get the value rows of those keys.
 
 **Propose standard (catalog + rules)** goes one step further and matches automatically, also when the catalog is
-still empty: keys with the same meaning are merged (`room`, `Raum`, `pomieszczenie` → `location`; built-in
+still empty. It covers **every used tag**: the custom tags of the influxdb settings, the tags stored in the old
+database (option; connection of tab *Migration of data*) and the tags of the states of this instance. Incomplete rows
+(e.g. left by *Take over old tags*) are filled in, keys that allow other values get their used values listed and
+their spelling variants merged too, and the message reports whether all used values are covered: keys with the same meaning are merged (`room`, `Raum`, `pomieszczenie` → `location`; built-in
 synonyms in EN/DE/PL/FR/IT/ES), values that differ only in spelling or language are merged (`Kotłownia`,
 `kotlownia`, `Heizungsraum` → `KOTLOWNIA`), the ioBroker rooms and functions serve as standard values, and missing
 keys/values are added to the tag catalog. Numbers are compared exactly (`-1` stays different from `1`). The spelling
 of new values is *automatic* (follows the catalog; empty catalog: `UPPER_CASE`), `UPPER_CASE`, `lower_case` or *as
-used*. Only the form is filled – existing rows and your own rules are kept; check the Tags tab, the rules and the
-preview, then save. Similarity is only used for this proposal, never at runtime.
+used*. Only the form is filled – existing complete rows and your own rules are kept; check the Tags tab, the rules
+and the preview, then save. Similarity is only used for this proposal, never at runtime. With the option *Apply also
+standardises the tags of states already configured for this instance* (on by default), *Apply* rewrites such tags
+too – only where the rules translate them into an allowed catalog tag; the preview lists these changes.
 
 | Old key | Old values | New key | New value | Effect |
 | --- | --- | --- | --- | --- |
@@ -336,6 +341,9 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 * (Piotr Siedlak) Settings tables are also accepted when they are stored as objects (e.g. written by scripts)
 * (Piotr Siedlak) Migration of settings: tag rules translate the custom tags of influxdb into catalog tags, with a
   live preview of the result and of the tags that still do not fit
+* (Piotr Siedlak) "Propose standard" covers every used tag (influxdb settings, old database, this instance), fills
+  incomplete rows, standardises open lists too and reports the coverage; Apply can standardise tags of states
+  already configured for this instance
 * (Piotr Siedlak) Migration of settings: "Propose standard" matches old keys and values automatically (synonyms,
   spelling, ioBroker rooms/functions) and proposes catalog entries and rules
 * (Piotr Siedlak) Tag rules: old keys and values are offered from the influxdb settings, a rule can cover several old

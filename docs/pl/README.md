@@ -260,14 +260,19 @@ wartością. Istniejące wiersze nigdy nie są zmieniane – po wybraniu nowych 
 wartości tych kluczy.
 
 **Zaproponuj standard (katalog + reguły)** idzie krok dalej i dopasowuje automatycznie, także przy pustym
-katalogu: klucze o tym samym znaczeniu są łączone (`room`, `Raum`, `pomieszczenie` → `location`; wbudowane
+katalogu. Obejmuje **każdy używany tag**: własne tagi z ustawień influxdb, tagi zapisane w starej bazie (opcja;
+połączenie z zakładki *Migracja danych*) oraz tagi stanów tej instancji. Niekompletne wiersze (np. pozostawione przez
+*Przejmij stare tagi*) są uzupełniane, klucze dopuszczające inne wartości dostają listę używanych wartości i również
+łączone warianty pisowni, a komunikat podaje, czy wszystkie używane wartości są objęte: klucze o tym samym znaczeniu są łączone (`room`, `Raum`, `pomieszczenie` → `location`; wbudowane
 synonimy EN/DE/PL/FR/IT/ES), wartości różniące się tylko pisownią lub językiem są łączone (`Kotłownia`, `kotlownia`,
 `Heizungsraum` → `KOTLOWNIA`), pomieszczenia i funkcje ioBrokera służą jako wartości standardowe, a brakujące
 klucze/wartości są dodawane do katalogu tagów. Liczby są porównywane dokładnie (`-1` pozostaje różne od `1`).
 Pisownia nowych wartości: *automatycznie* (jak w katalogu; pusty katalog: `WIELKIE_LITERY`), `WIELKIE_LITERY`,
 `małe_litery` albo *jak najczęściej używane*. Wypełniany jest tylko formularz – istniejące wiersze i Twoje reguły
 pozostają; sprawdź zakładkę Tagi, reguły i podgląd, a potem zapisz. Podobieństwo służy tylko do tej propozycji,
-nigdy w czasie działania.
+nigdy w czasie działania. Z opcją *Zastosuj standaryzuje też tagi stanów już skonfigurowanych dla tej instancji*
+(domyślnie włączona) *Zastosuj* przepisuje także takie tagi – tylko tam, gdzie reguły tłumaczą je na dozwolony tag z
+katalogu; podgląd pokazuje te zmiany.
 
 | Stary klucz | Stare wartości | Nowy klucz | Nowa wartość | Efekt |
 | --- | --- | --- | --- | --- |

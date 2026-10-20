@@ -192,6 +192,18 @@ describe('import of historical data with real InfluxDB 1.x / 2.x servers', funct
             }
         });
 
+        it('lists the tags stored in the points with the number of measurements', async () => {
+            const r = createLegacyReader(v1Config());
+            try {
+                const uses = await r.tagInventory();
+                const room = uses.find(u => u.key === 'room' && u.value === 'kotlownia');
+                assert.ok(room && (room.measurements ?? 0) >= 1, JSON.stringify(uses.slice(0, 20)));
+                assert.ok(!uses.some(u => ['ack', 'q', 'from'].includes(u.key)));
+            } finally {
+                r.close();
+            }
+        });
+
         it('reports wrong credentials and a missing database', async () => {
             const bad = new InfluxDB1Reader(v1Config({ password: 'wrong' }));
             const res = await bad.check();
@@ -255,6 +267,20 @@ describe('import of historical data with real InfluxDB 1.x / 2.x servers', funct
                 );
                 const text = await r.read(`${RUN}.text`, T0, T0 + 1);
                 assert.equal(text[0].value, 'line\nbreak, comma "quote"');
+            } finally {
+                r.close();
+            }
+        });
+
+        it('lists the tags stored in the points (ack/q/from tags of "use tags" excluded)', async () => {
+            const r = createLegacyReader(v2Config());
+            try {
+                const uses = await r.tagInventory();
+                assert.ok(
+                    uses.some(u => u.key === 'room' && u.value === 'Salon'),
+                    JSON.stringify(uses.slice(0, 20)),
+                );
+                assert.ok(!uses.some(u => ['ack', 'q', 'from'].includes(u.key) || u.key.startsWith('_')));
             } finally {
                 r.close();
             }

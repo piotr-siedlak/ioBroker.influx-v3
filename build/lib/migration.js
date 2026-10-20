@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.mapInfluxdbConfig = mapInfluxdbConfig;
 exports.buildMigrationPreview = buildMigrationPreview;
+exports.standardizeTags = standardizeTags;
+exports.collectInstanceTags = collectInstanceTags;
 exports.collectOldTags = collectOldTags;
 exports.planSettingsMigration = planSettingsMigration;
 exports.formatSettingsPreview = formatSettingsPreview;
@@ -76,6 +78,63 @@ function buildMigrationPreview(objects, sourceInstance, targetNamespace) {
     return items.sort((a, b) => a.id.localeCompare(b.id));
 }
 /**
+ * Applies the rules to tags of this instance: a tag is replaced only when the rules translate it into an allowed
+ * catalog tag; other tags (incl. templates) stay as they are. Duplicate keys after the translation: first wins.
+ *
+ * @param tags current custom tags
+ * @param rules tag rules
+ * @param catalog tag catalog
+ * @param style key style
+ */
+function standardizeTags(tags, rules, catalog, style) {
+    const out = [];
+    const changes = [];
+    const seen = new Set();
+    for (const t of tags) {
+        if (!t || typeof t.key !== 'string' || typeof t.value !== 'string') {
+            continue;
+        }
+        let next = t;
+        if (!/\{[^}]+\}/.test(t.value)) {
+            const r = (0, tagMapping_1.applyTagRules)([t], rules, catalog, style);
+            if (r.tags.length) {
+                next = r.tags[0];
+            }
+        }
+        const k = next.key.trim().toLowerCase();
+        if (seen.has(k)) {
+            changes.push(`${t.key}=${t.value} → removed (${next.key} is already set)`);
+            continue;
+        }
+        seen.add(k);
+        if (next.key !== t.key || next.value !== t.value) {
+            changes.push(`${t.key}=${t.value} → ${next.key}=${next.value}`);
+        }
+        out.push(next);
+    }
+    return { tags: out, changes };
+}
+/**
+ * Custom tags of the states configured for this instance (templates excluded) - also "used tags".
+ *
+ * @param objects rows of the `system/custom` view
+ * @param namespace e.g. `influx-v3.0`
+ */
+function collectInstanceTags(objects, namespace) {
+    const perState = [];
+    for (const o of objects) {
+        const c = o.custom?.[namespace];
+        if (!c || !c.enabled || !Array.isArray(c.customTags)) {
+            continue;
+        }
+        const tags = c.customTags.filter(t => t && typeof t.key === 'string' && typeof t.value === 'string' && !/\{[^}]+\}/.test(t.value));
+        if (tags.length) {
+            perState.push(tags);
+        }
+    }
+    return (0, tagMapping_1.buildOldTagInventory)(perState, 'instance');
+}
+/**
  * Old custom tags of the states enabled in the given influxdb instance(s).
  *
  * @param objects rows of the `system/custom` view
@@ -110,6 +169,7 @@ function collectOldTags(objects, source) {
  * @param opts.style tag key style of the target instance
  * @param opts.overwrite also re-configure states that are already configured
  * @param opts.ids only these ids
+ * @param opts.standardizeExisting also standardise the tags of states already configured for the target
  */
 function planSettingsMigration(objects, source, target, opts) {
     const preview = buildMigrationPreview(objects, source, target);
@@ -139,7 +199,27 @@ function planSettingsMigration(objects, source, target, opts) {
         }
         todo.push({ ...item, tagResult, config });
     }
+    const existing = [];
+    if (opts.standardizeExisting) {
+        const todoIds = new Set(todo.map(t => t.id));
+        for (const o of objects) {
+            const c = o.custom?.[target];
+            if (!c ||
+                !c.enabled ||
+                todoIds.has(o.id) ||
+                (opts.ids && !opts.ids.has(o.id)) ||
+                !Array.isArray(c.customTags)) {
+                continue;
+            }
+            const r = standardizeTags(c.customTags, opts.rules, opts.catalog, opts.style);
+            if (r.changes.length) {
+                existing.push({ id: o.id, customTags: r.tags, changes: r.changes });
+            }
+        }
+        existing.sort((a, b) => a.id.localeCompare(b.id));
+    }
     return {
+        existing,
         inventory: collectOldTags(objects, source),
         source,
         target,
@@ -193,6 +273,15 @@ function formatSettingsPreview(plan, maxStates = 60) {
         }
         if (sorted.length > 40) {
             lines.push(`    … and ${sorted.length - 40} more`);
+        }
+    }
+    if (plan.existing.length) {
+        lines.push('', `States already configured for ${plan.target} - tags standardised by "Apply" (${plan.existing.length}):`);
+        for (const e of plan.existing.slice(0, 40)) {
+            lines.push(`• ${e.id}`, ...e.changes.map(c => `    ${c}`));
+        }
+        if (plan.existing.length > 40) {
+            lines.push(`… and ${plan.existing.length - 40} more state(s)`);
         }
     }
     lines.push('', `Settings of ${plan.source} are not changed. Historical data: tab "Migration of data".`);

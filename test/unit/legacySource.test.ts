@@ -3,6 +3,7 @@ import {
     buildFluxRead,
     buildFluxTimeRange,
     buildInfluxQLRead,
+    countTagUses,
     fluxTablesToPoints,
     influxQLSeriesToPoints,
     LegacyReadError,
@@ -44,6 +45,24 @@ describe('legacy source (InfluxDB 1.x/2.x reader)', () => {
             assert.match(q, /pivot\(rowKey: \["_time"\], columnKey: \["_field"\], valueColumn: "_value"\)/);
             assert.match(buildFluxTimeRange('b', 'm'), /yield\(name: "first"\)[\s\S]*yield\(name: "last"\)/);
         });
+    });
+
+    it('counts tag uses per measurement without metadata keys', () => {
+        assert.deepEqual(
+            countTagUses([
+                { key: 'room', value: 'Salon' },
+                { key: 'room', value: 'Salon' },
+                { key: 'room', value: 'Garaż' },
+                { key: 'ack', value: 'true' },
+                { key: 'from', value: 'js.0' },
+                { key: '_measurement', value: 'x' },
+                { key: 'floor', value: '' },
+            ]),
+            [
+                { key: 'room', value: 'Salon', measurements: 2 },
+                { key: 'room', value: 'Garaż', measurements: 1 },
+            ],
+        );
     });
 
     it('parses RFC 3339 times with any fraction and offset', () => {

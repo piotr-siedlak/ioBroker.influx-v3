@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.InfluxDB2Reader = exports.InfluxDB1Reader = exports.LegacyReadError = void 0;
+exports.InfluxDB2Reader = exports.InfluxDB1Reader = exports.LegacyReadError = exports.MAX_TAG_VALUES = void 0;
 exports.quoteInfluxQLIdentifier = quoteInfluxQLIdentifier;
 exports.quoteFluxString = quoteFluxString;
 exports.influxQLSource = influxQLSource;
@@ -14,6 +14,7 @@ exports.influxQLSeriesToPoints = influxQLSeriesToPoints;
 exports.parseCsvRecords = parseCsvRecords;
 exports.parseAnnotatedCsv = parseAnnotatedCsv;
 exports.fluxTablesToPoints = fluxTablesToPoints;
+exports.countTagUses = countTagUses;
 exports.createLegacyReader = createLegacyReader;
 /**
  * Read-only access to the database of the classic ioBroker.influxdb adapter (InfluxDB 1.x or 2.x) for the
@@ -25,6 +26,8 @@ exports.createLegacyReader = createLegacyReader;
  */
 const influxClient_1 = require("./influxClient");
 const redact_1 = require("./redact");
+/** maximum number of values read per tag key */
+exports.MAX_TAG_VALUES = 5000;
 class LegacyReadError extends Error {
     kind;
     constructor(message, kind) {
@@ -543,8 +546,40 @@ class InfluxDB1Reader extends HttpReader {
         const [series] = await this.query(`SHOW MEASUREMENTS LIMIT ${Math.max(1, Math.floor(limit))}`);
         return (series?.[0]?.values ?? []).map(v => String(v[0]));
     }
+    async tagInventory() {
+        // one series per measurement with rows [key, value]
+        const [series] = await this.query('SHOW TAG VALUES WITH KEY =~ /.+/');
+        return countTagUses((series ?? []).flatMap(s => (s.values ?? []).map(v => ({ key: String(v[0]), value: String(v[1]) }))));
+    }
 }
 exports.InfluxDB1Reader = InfluxDB1Reader;
+/**
+ * Counts tag uses (one entry per measurement and value), drops metadata keys and caps the values per key.
+ *
+ * @param rows key/value per measurement
+ */
+function countTagUses(rows) {
+    const counts = new Map();
+    const perKey = new Map();
+    for (const r of rows) {
+        if (!r.key || r.key.startsWith('_') || META.has(r.key) || r.value === '') {
+            continue;
+        }
+        const id = `${r.key}\u0000${r.value}`;
+        const e = counts.get(id);
+        if (e) {
+            e.measurements = (e.measurements ?? 0) + 1;
+            continue;
+        }
+        const n = perKey.get(r.key) ?? 0;
+        if (n >= exports.MAX_TAG_VALUES) {
+            continue;
+        }
+        perKey.set(r.key, n + 1);
+        counts.set(id, { key: r.key, value: r.value, measurements: 1 });
+    }
+    return [...counts.values()];
+}
 /** InfluxDB 2.x (Flux over `/api/v2/query`, annotated CSV) */
 class InfluxDB2Reader extends HttpReader {
     authHeaders() {
@@ -581,6 +616,33 @@ class InfluxDB2Reader extends HttpReader {
     }
     async read(measurement, from, to) {
         return fluxTablesToPoints(await this.flux(buildFluxRead(this.cfg.bucket, measurement, from, to)));
+    }
+    async tagInventory() {
+        const range = `start: time(v: "${FAR_PAST}"), stop: time(v: "${FAR_FUTURE}")`;
+        const schemaImport = `import ${quoteFluxString('influxdata/influxdb/schema')}`;
+        const keys = [];
+        for (const t of await this.flux(`${schemaImport}\nschema.tagKeys(bucket: ${quoteFluxString(this.cfg.bucket)}, ${range})`)) {
+            const idx = t.columns.indexOf('_value');
+            for (const row of t.rows) {
+                const k = row[idx];
+                if (k && !k.startsWith('_') && !META.has(k) && !keys.includes(k)) {
+                    keys.push(k);
+                }
+            }
+        }
+        const out = [];
+        for (const key of keys) {
+            const q = `${schemaImport}\nschema.tagValues(bucket: ${quoteFluxString(this.cfg.bucket)}, tag: ${quoteFluxString(key)}, ${range})\n  |> limit(n: ${exports.MAX_TAG_VALUES})`;
+            for (const t of await this.flux(q)) {
+                const idx = t.columns.indexOf('_value');
+                for (const row of t.rows) {
+                    if (row[idx]) {
+                        out.push({ key, value: row[idx] });
+                    }
+                }
+            }
+        }
+        return out;
     }
     async listMeasurements(limit) {
         const q = [

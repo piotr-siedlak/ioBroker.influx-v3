@@ -433,6 +433,8 @@ tests.integration(path.join(__dirname, '..'), {
             // outside of `${M}.*`, so the import test below does not select them
             const O = `${BASE}.oldtags`;
             const oldIds = { kot: `${O}.kot`, garage: `${O}.garage` };
+            // configured for this instance only, with a tag from before the tag catalog (ignored at runtime)
+            const ownId = `${O}.own`;
             const RULES = [{ fromKey: 'room', fromValue: '', toKey: 'Location', toValue: '' }];
             const T = Date.UTC(2024, 0, 1);
 
@@ -469,6 +471,10 @@ tests.integration(path.join(__dirname, '..'), {
                 await harness.objects.setObjectAsync(ids.aliased, stateObject('number', classic({ aliasId: OLD_ALIAS })));
                 await harness.objects.setObjectAsync(ids.sw, stateObject('boolean', classic({})));
                 await harness.objects.setObjectAsync(oldIds.kot, stateObject('number', classic({ customTags: [{ name: 'room', value: 'Kotłownia' }] })));
+                await harness.objects.setObjectAsync(
+                    ownId,
+                    stateObject('number', { 'influx-v3.0': { enabled: true, customTags: [{ key: 'room', value: 'kotlownia' }] } }),
+                );
                 await harness.objects.setObjectAsync(
                     oldIds.garage,
                     stateObject('number', classic({ customTags: [{ name: 'room', value: 'Garaż' }, { name: 'floor', value: '2' }] })),
@@ -569,6 +575,37 @@ tests.integration(path.join(__dirname, '..'), {
                 // a second proposal on top of the first one has nothing left to do
                 const again = await sendTo(harness, 'migrationProposeStandard', { source: 'influxdb.0', rules, catalog: cat, valueStyle: 'upper' });
                 assert.equal(again.result, 'standardNothing');
+            });
+
+            it('"propose standard" covers every used tag: settings, old points and this instance', async function () {
+                this.timeout(60000);
+                const res = await sendTo(harness, 'migrationProposeStandard', {
+                    source: 'influxdb.0',
+                    rules: [],
+                    catalog: CATALOG,
+                    valueStyle: 'upper',
+                    includeOldPoints: !!V2,
+                });
+                assert.equal(res.result, 'standardProposed', JSON.stringify(res));
+                assert.match(res.args[3], /^All \d+ used tag value\(s\) are covered/, res.args[3]);
+                assert.equal(res.coverage.uncovered.length, 0);
+                if (V2) {
+                    const values = await sendTo(harness, 'getOldTagValues', { source: 'influxdb.0', key: 'room', includeOldPoints: true });
+                    const salon = values.find(v => v.value === 'salon');
+                    assert.ok(salon && /old points/.test(salon.label), JSON.stringify(values));
+                }
+            });
+
+            it('apply standardises tags of states already configured for this instance', async function () {
+                this.timeout(20000);
+                const preview = await sendTo(harness, 'migrationPreviewHtml', { source: 'influxdb.0', rules: RULES, catalog: CATALOG, ids: [ownId] });
+                assert.match(preview.text, /tags standardised by &quot;Apply&quot; \(1\)/);
+                assert.match(preview.text, /room=kotlownia → Location=KOTLOWNIA/);
+                const res = await sendTo(harness, 'migrationApply', { source: 'influxdb.0', rules: RULES, ids: [ownId] });
+                assert.match(res.result, /tags of 1 already configured state\(s\) standardised/);
+                const obj = await harness.objects.getObjectAsync(ownId);
+                assert.deepEqual(obj.common.custom['influx-v3.0'].customTags, [{ key: 'Location', value: 'KOTLOWNIA' }]);
+                assert.equal(obj.common.custom['influx-v3.0'].enabled, true, 'other settings untouched');
             });
 
             it('one rule with several old values is applied', async function () {

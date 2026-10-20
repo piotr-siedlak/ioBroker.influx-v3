@@ -54,6 +54,9 @@ class FakeSource implements LegacyReader {
     listMeasurements(): Promise<string[]> {
         return Promise.resolve(Object.keys(this.data));
     }
+    tagInventory(): Promise<{ key: string; value: string }[]> {
+        return Promise.resolve([]);
+    }
     close(): void {}
 }
 

@@ -92,8 +92,10 @@ class InfluxV3Adapter extends utils.Adapter {
     /** running import of historical data */
     dmRun;
     dmLastProgress = 0;
-    /** old custom tags of the influxdb settings (dropdowns of the rule table ask often) */
+    /** used tags of the settings (dropdowns of the rule table ask often) */
     oldTagCache;
+    /** tags stored in the old database (expensive: cached for a minute) */
+    pointTagCache;
     constructor(options = {}) {
         super({ ...options, name: 'influx-v3' });
         this.on('ready', this.onReady.bind(this));
@@ -1550,6 +1552,7 @@ class InfluxV3Adapter extends utils.Adapter {
             catalog: mode === 'apply' ? this.cfg.tagDefinitions : this.catalogFrom(m.catalog),
             style: this.cfg.tagKeyStyle,
             overwrite: m.overwrite === true,
+            standardizeExisting: m.standardizeExisting !== false,
             ids: Array.isArray(m.ids)
                 ? new Set(m.ids.filter((x) => typeof x === 'string'))
                 : undefined,
@@ -1561,6 +1564,7 @@ class InfluxV3Adapter extends utils.Adapter {
             return this.reply(msg, { result: (0, migration_1.formatSettingsPreview)(plan, 30), items: plan.todo.map(p => p.id) });
         }
         let done = 0;
+        let standardized = 0;
         const failed = [];
         for (const item of plan.todo) {
             try {
@@ -1571,24 +1575,77 @@ class InfluxV3Adapter extends utils.Adapter {
                 failed.push(`${item.id}: ${(0, redact_1.redact)(e)}`);
             }
         }
+        for (const ex of plan.existing) {
+            try {
+                await this.writeCustomConfig(ex.id, { customTags: ex.customTags });
+                standardized++;
+            }
+            catch (e) {
+                failed.push(`${ex.id}: ${(0, redact_1.redact)(e)}`);
+            }
+        }
         this.log.info(`Migration from ${source}: ${done} state(s) configured by request of ${msg.from}${plan.unmatched.size ? ` (${plan.unmatched.size} old tag value(s) did not fit the tag catalog)` : ''}`);
         this.reply(msg, {
-            result: `${done} state(s) configured for ${this.namespace}.${failed.length ? ` ${failed.length} failed.` : ''} ${source} was not changed.`,
+            result: `${done} state(s) configured for ${this.namespace}${standardized ? `, tags of ${standardized} already configured state(s) standardised` : ''}.${failed.length ? ` ${failed.length} failed.` : ''} ${source} was not changed.`,
             failed: failed.length ? failed : undefined,
         });
     }
     // ------------------------------------------------------------------ old tags of the influxdb settings (ADR-0006)
-    async oldTags(sourceRaw) {
+    /**
+     * Used tags: custom tags of the influxdb settings and of this instance, plus (option) the tags stored in the
+     * old database of tab "Migration of data".
+     *
+     * @param sourceRaw influxdb instance or '' for all
+     * @param includePointsRaw read the old database (default: saved option)
+     */
+    async oldTags(sourceRaw, includePointsRaw) {
         const source = typeof sourceRaw === 'string' && /^influxdb\.\d+$/.test(sourceRaw) ? sourceRaw : '';
+        const native = this.config;
+        const includePoints = typeof includePointsRaw === 'boolean' ? includePointsRaw : native.migrationIncludeOldPoints !== false;
         const now = Date.now();
+        let settings;
         if (this.oldTagCache && this.oldTagCache.source === source && now - this.oldTagCache.at < 5000) {
-            return this.oldTagCache.inventory;
+            settings = this.oldTagCache.inventory;
         }
-        const view = await this.getObjectViewAsync('system', 'custom', {});
-        const rows = (view?.rows ?? []);
-        const inventory = (0, migration_1.collectOldTags)(rows.map(r => ({ id: r.id, custom: r.value ?? {} })), source);
-        this.oldTagCache = { at: now, source, inventory };
-        return inventory;
+        else {
+            const view = await this.getObjectViewAsync('system', 'custom', {});
+            const rows = (view?.rows ?? []).map(r => ({
+                id: r.id,
+                custom: r.value ?? {},
+            }));
+            settings = (0, tagMapping_1.mergeInventories)((0, migration_1.collectOldTags)(rows, source), (0, migration_1.collectInstanceTags)(rows, this.namespace));
+            this.oldTagCache = { at: now, source, inventory: settings };
+        }
+        const notes = [];
+        if (!includePoints) {
+            return { inventory: settings, notes };
+        }
+        const { source: db } = this.dmConfig();
+        if ((0, dataMigration_1.validateSource)(db).length) {
+            return { inventory: settings, notes }; // no old database configured
+        }
+        const ident = JSON.stringify([db.version, db.url, db.database, db.org, db.bucket]);
+        if (!this.pointTagCache || this.pointTagCache.ident !== ident || now - this.pointTagCache.at > 60_000) {
+            const reader = (0, legacySource_1.createLegacyReader)(db);
+            try {
+                this.pointTagCache = { at: now, ident, uses: await reader.tagInventory() };
+            }
+            catch (e) {
+                this.pointTagCache = { at: now, ident, uses: [], error: e instanceof Error ? e.message : (0, redact_1.redact)(e) };
+            }
+            finally {
+                reader.close();
+            }
+        }
+        if (this.pointTagCache.error) {
+            notes.push(`Tags of the old database not read: ${this.pointTagCache.error}`);
+            return { inventory: settings, notes };
+        }
+        const points = { keys: new Map() };
+        for (const u of this.pointTagCache.uses) {
+            (0, tagMapping_1.addToInventory)(points, u.key, u.value, u.measurements ?? 0, 'points');
+        }
+        return { inventory: (0, tagMapping_1.mergeInventories)(settings, points), notes };
     }
     /** Names of all ioBroker rooms or functions (system language) */
     async enumNames(prefix) {
@@ -1609,7 +1666,7 @@ class InfluxV3Adapter extends utils.Adapter {
     async handleProposeStandard(msg) {
         const m = (msg.message ?? {});
         const native = this.config;
-        const inventory = await this.oldTags(m.source);
+        const { inventory, notes } = await this.oldTags(m.source, m.includeOldPoints);
         if (!inventory.keys.size) {
             return this.reply(msg, { result: 'noOldTags', args: [] });
         }
@@ -1624,14 +1681,31 @@ class InfluxV3Adapter extends utils.Adapter {
             rooms: useEnums ? await this.enumNames('enum.rooms.') : [],
             functions: useEnums ? await this.enumNames('enum.functions.') : [],
         });
-        if (!p.newKeys.length && !p.newValues && !p.newRules) {
-            return this.reply(msg, { result: 'standardNothing', args: [] });
+        const c = p.coverage;
+        const coverage = c.uncovered.length === 0
+            ? `All ${c.total} used tag value(s) are covered${c.removed ? ` (${c.removed} removed by rules)` : ''}.`
+            : `${c.covered} of ${c.total} used tag value(s) covered, ${c.uncovered.length} not:\n${c.uncovered
+                .slice(0, 20)
+                .map(u => `  ${u}`)
+                .join('\n')}`;
+        const text = [
+            coverage,
+            ...notes,
+            p.completedRows ? `${p.completedRows} incomplete row(s) filled in.` : '',
+            '',
+            ...p.summary,
+        ]
+            .filter((l, i) => l || i > 0)
+            .join('\n');
+        if (!p.newKeys.length && !p.newValues && !p.newRules && !p.completedRows) {
+            return this.reply(msg, { result: 'standardNothing', args: [], coverage: c });
         }
         this.reply(msg, {
             native: { tagDefinitions: p.catalogRows, migrationTagRules: p.ruleRows },
             result: 'standardProposed',
-            args: [String(p.newKeys.length), String(p.newValues), String(p.newRules), p.summary.join('\n')],
+            args: [String(p.newKeys.length), String(p.newValues), String(p.newRules), text],
             summary: p.summary,
+            coverage: c,
         });
     }
     /** Tag catalog sent by the Admin page (being edited), else the saved one */
@@ -1642,7 +1716,8 @@ class InfluxV3Adapter extends utils.Adapter {
     }
     /** Options of the "old key" column: keys of the old custom tags */
     async oldTagKeyOptions(message) {
-        const inv = await this.oldTags(message?.source);
+        const m = (message ?? {});
+        const inv = (await this.oldTags(m.source, m.includeOldPoints)).inventory;
         return [...inv.keys.values()]
             .sort((a, b) => a.key.localeCompare(b.key))
             .map(e => ({
@@ -1654,13 +1729,13 @@ class InfluxV3Adapter extends utils.Adapter {
     async oldTagValueOptions(message) {
         const m = (message ?? {});
         const key = typeof m.key === 'string' ? m.key.trim().toLowerCase() : '';
-        const entry = key ? (await this.oldTags(m.source)).keys.get(key) : undefined;
+        const entry = key ? (await this.oldTags(m.source, m.includeOldPoints)).inventory.keys.get(key) : undefined;
         if (!entry) {
             return [];
         }
-        return [...entry.values.entries()]
-            .sort((a, b) => a[0].localeCompare(b[0]))
-            .map(([value, n]) => ({ value, label: `${value} (${n} state(s))` }));
+        return [...entry.values.keys()]
+            .sort((a, b) => a.localeCompare(b))
+            .map(value => ({ value, label: `${value} (${(0, tagMapping_1.describeUse)(entry, value)})` }));
     }
     /** "Take over old tags": appends the rule rows that are still needed (sendTo `useNative`) */
     async handleSuggestRules(msg) {
@@ -1669,7 +1744,7 @@ class InfluxV3Adapter extends utils.Adapter {
             ? m.rules
             : (0, config_1.tableRows)(this.config.migrationTagRules);
         const rules = (0, tagMapping_1.parseTagRules)(rawRows);
-        const inventory = await this.oldTags(m.source);
+        const { inventory } = await this.oldTags(m.source, m.includeOldPoints);
         const added = (0, tagMapping_1.suggestTagRules)(inventory, rules, this.catalogFrom(m.catalog), this.cfg.tagKeyStyle);
         this.reply(msg, {
             native: { migrationTagRules: [...rawRows, ...added.map(tagMapping_1.ruleToRow)] },

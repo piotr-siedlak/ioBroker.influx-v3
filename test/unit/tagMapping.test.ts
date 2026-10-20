@@ -1,6 +1,12 @@
 import { strict as assert } from 'node:assert';
 import type { TagDefinition } from '../../src/lib/config';
-import { formatSettingsPreview, planSettingsMigration, preformattedHtml } from '../../src/lib/migration';
+import {
+    collectInstanceTags,
+    formatSettingsPreview,
+    planSettingsMigration,
+    preformattedHtml,
+    standardizeTags,
+} from '../../src/lib/migration';
 import {
     applyTagRules,
     buildOldTagInventory,
@@ -236,6 +242,65 @@ describe('settings migration plan', () => {
             one.todo.map(p => p.id),
             ['a.0.done'],
         );
+    });
+
+    it('tags of states already configured for this instance are standardised only where the rules give a valid tag', () => {
+        const objs = [
+            ...objects,
+            {
+                id: 'a.0.own',
+                custom: {
+                    'influx-v3.0': {
+                        enabled: true,
+                        customTags: [
+                            { key: 'room', value: 'kotlownia' },
+                            { key: 'floor', value: '3' },
+                            { key: 'device', value: '{id.segment[2]}' },
+                            { key: 'Location', value: 'SALON' },
+                        ],
+                    },
+                },
+            },
+        ];
+        const r = standardizeTags(
+            (objs[4].custom['influx-v3.0'] as { customTags: { key: string; value: string }[] }).customTags,
+            rules,
+            CATALOG,
+            'snake',
+        );
+        assert.deepEqual(r.tags, [
+            { key: 'Location', value: 'KOTLOWNIA' },
+            { key: 'floor', value: '3' },
+            { key: 'device', value: '{id.segment[2]}' },
+        ]);
+        assert.deepEqual(r.changes, [
+            'room=kotlownia → Location=KOTLOWNIA',
+            'Location=SALON → removed (Location is already set)',
+        ]);
+        const plan = planSettingsMigration(objs, 'influxdb.0', 'influx-v3.0', {
+            rules,
+            catalog: CATALOG,
+            style: 'snake',
+            overwrite: false,
+            standardizeExisting: true,
+        });
+        assert.deepEqual(
+            plan.existing.map(e => e.id),
+            ['a.0.own'],
+        );
+        assert.match(
+            formatSettingsPreview(plan),
+            /tags standardised by "Apply" \(1\):\n• a\.0\.own\n {4}room=kotlownia → Location=KOTLOWNIA/,
+        );
+        const off = planSettingsMigration(objs, 'influxdb.0', 'influx-v3.0', {
+            rules,
+            catalog: CATALOG,
+            style: 'snake',
+            overwrite: false,
+        });
+        assert.equal(off.existing.length, 0);
+        const own = collectInstanceTags(objs, 'influx-v3.0');
+        assert.deepEqual([...own.keys.keys()], ['room', 'floor', 'location'], 'templates are not used tags');
     });
 
     it('the HTML preview escapes everything', () => {

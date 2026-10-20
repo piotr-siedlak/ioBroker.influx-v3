@@ -17,6 +17,7 @@ import {
     parseTagRules,
     ruleToRow,
     type TagRule,
+    useCount,
 } from './tagMapping';
 import { normalizeTagKey } from './tagResolver';
 
@@ -322,6 +323,18 @@ export interface ProposalInput {
     functions?: string[];
     /** distinct values above which a new key allows other values instead of a closed list */
     maxListValues?: number;
+    /** values listed in the catalog for keys that allow other values */
+    maxOpenListValues?: number;
+}
+
+export interface Coverage {
+    /** used key/value pairs */
+    total: number;
+    covered: number;
+    /** removed on purpose by a rule (`-`) */
+    removed: number;
+    /** `key=value: reason` of pairs that still do not fit */
+    uncovered: string[];
 }
 
 export interface StandardProposal {
@@ -330,8 +343,11 @@ export interface StandardProposal {
     newKeys: string[];
     newValues: number;
     newRules: number;
+    /** incomplete rows (empty new key/value) that were completed */
+    completedRows: number;
     /** readable summary, e.g. `room, Raum → location: Kotłownia, Heizungsraum → KOTLOWNIA` */
     summary: string[];
+    coverage: Coverage;
 }
 
 interface KeyPlan {
@@ -346,9 +362,44 @@ interface KeyPlan {
 const keyNorm = (k: string, style: TagKeyStyle): string => normalizeTagKey(k, style).toLowerCase();
 
 /**
- * Proposes catalog rows and rule rows for all old tags.
+ * True when a rule row is only a placeholder: an empty new key/value that still leads to a rejected tag with the
+ * current catalog (e.g. a row added by "Take over old tags" and not filled in yet). Complete rows and removals are
+ * decisions of the user.
  *
- * @param inv old custom tags of the influxdb settings
+ * @param r rule
+ * @param inv used tags
+ * @param catalog current catalog
+ * @param style key style
+ */
+function isPlaceholder(
+    r: TagRule,
+    inv: OldTagInventory,
+    catalog: readonly TagDefinition[],
+    style: TagKeyStyle,
+): boolean {
+    if (r.toKey === DROP_KEY) {
+        return false;
+    }
+    if (!r.fromValues.length) {
+        if (r.toKey) {
+            return false; // key translation: the values are handled separately
+        }
+        const used = [...(inv.keys.get(r.fromKey.toLowerCase())?.values.keys() ?? [])];
+        return (
+            !used.length ||
+            used.some(v => !applyTagRules([{ key: r.fromKey, value: v }], [r], catalog, style).tags.length)
+        );
+    }
+    if (r.toKey && r.toValue) {
+        return false;
+    }
+    return r.fromValues.some(v => !applyTagRules([{ key: r.fromKey, value: v }], [r], catalog, style).tags.length);
+}
+
+/**
+ * Proposes catalog rows and rule rows so that every used tag fits a standard.
+ *
+ * @param inv used tags (influxdb settings, old points, this instance)
  * @param input catalog, rules and options from the form
  */
 export function proposeStandard(inv: OldTagInventory, input: ProposalInput): StandardProposal {
@@ -359,12 +410,16 @@ export function proposeStandard(inv: OldTagInventory, input: ProposalInput): Sta
     >[];
     const ruleRaw = tableRows(input.ruleRows);
     const catalog = parseTagDefinitions(catalogRaw, style, input.valueField, []);
-    const rules = parseTagRules(ruleRaw);
+    const allRules = parseTagRules(ruleRaw);
+    /** decisions of the user: complete rows and removals (placeholders are completed below) */
+    const rules = allRules.filter(r => !isPlaceholder(r, inv, catalog, style));
     const valueStyle = resolveValueStyle(input.valueStyle, catalog);
     const maxList = input.maxListValues ?? 25;
+    const maxOpen = input.maxOpenListValues ?? 1000;
     const reserved = new Set([...RESERVED_TAG_KEYS, input.valueField.toLowerCase()]);
 
     const plans = new Map<string, KeyPlan>(); // by normalised standard key
+    const planByOldKey = new Map<string, KeyPlan>(); // old key (lower case) → plan
     const planOf = (key: string, def: TagDefinition | undefined): KeyPlan => {
         const n = keyNorm(key, style);
         let p = plans.get(n);
@@ -373,6 +428,10 @@ export function proposeStandard(inv: OldTagInventory, input: ProposalInput): Sta
             plans.set(n, p);
         }
         return p;
+    };
+    const ownRule = (key: string, value: string): boolean => {
+        const idx = findTagRule({ key, value }, rules);
+        return idx >= 0 && rules[idx].fromValues.length > 0;
     };
 
     // ---- keys: rule (user decision) → catalog (folding/synonyms) → other old key of the same group → new key
@@ -405,10 +464,11 @@ export function proposeStandard(inv: OldTagInventory, input: ProposalInput): Sta
         groupKey.set(group ?? fold, key);
         const plan = planOf(key, def);
         plan.oldKeys.push(e.key);
+        planByOldKey.set(e.key.toLowerCase(), plan);
         plan.values.set(e.key, new Map([...e.values.keys()].map(v => [v, undefined])));
     }
 
-    // ---- values per standard key
+    // ---- values per standard key (closed and open lists)
     const newCatalogRows: Record<string, unknown>[] = [];
     const extraValues = new Map<string, string[]>(); // existing catalog key (normalised) → appended values
     const summary: string[] = [];
@@ -417,11 +477,9 @@ export function proposeStandard(inv: OldTagInventory, input: ProposalInput): Sta
         const allOld: { oldKey: string; value: string; count: number }[] = [];
         for (const oldKey of plan.oldKeys) {
             const entry = inv.keys.get(oldKey.toLowerCase());
-            for (const [value, count] of entry?.values ?? []) {
-                // values with a rule of their own are the user's decision
-                const idx = findTagRule({ key: oldKey, value }, rules);
-                if (idx < 0 || !rules[idx].fromValues.length) {
-                    allOld.push({ oldKey, value, count });
+            for (const value of entry?.values.keys() ?? []) {
+                if (entry && !ownRule(oldKey, value)) {
+                    allOld.push({ oldKey, value, count: useCount(entry, value) });
                 }
             }
         }
@@ -451,9 +509,6 @@ export function proposeStandard(inv: OldTagInventory, input: ProposalInput): Sta
         const perStd = new Map<string, string[]>(); // standard value → old spellings (for the summary)
         const sortedGroups = [...groups.entries()].sort((a, b) => b[1].count - a[1].count || a[0].localeCompare(b[0]));
         for (const [fold, g] of sortedGroups) {
-            if (openList) {
-                continue; // other values allowed: values stay as they are
-            }
             const spelling = [...g.members].sort((a, b) => b.count - a.count)[0].value;
             const vg = valueGroup(spelling);
             let std =
@@ -463,7 +518,8 @@ export function proposeStandard(inv: OldTagInventory, input: ProposalInput): Sta
                 const en =
                     enumCandidates.find(c => c.fold === fold) ??
                     (vg ? enumCandidates.find(c => c.group === vg) : undefined);
-                std = styleValue(en ? en.name : spelling, valueStyle);
+                // open lists keep the most used spelling (free text such as device names); closed lists get the style
+                std = styleValue(en ? en.name : spelling, openList && !en ? 'asUsed' : valueStyle);
                 addCandidate(std);
                 added.push(std);
             }
@@ -478,9 +534,9 @@ export function proposeStandard(inv: OldTagInventory, input: ProposalInput): Sta
             .filter(([std, olds]) => olds.length > 1 || olds[0] !== std)
             .map(([std, olds]) => `${olds.join(', ')} → ${std}`);
         if (!plan.def) {
-            // unused ioBroker rooms/functions complete the standard list of a new key
-            const values = openList ? [] : [...candidates.map(c => c.std)];
+            const values = [...candidates.map(c => c.std)];
             if (!openList) {
+                // unused ioBroker rooms/functions complete the standard list of a new key
                 for (const en of enumCandidates) {
                     const std = styleValue(en.name, valueStyle);
                     if (!values.some(v => foldValue(v) === foldValue(std))) {
@@ -488,20 +544,25 @@ export function proposeStandard(inv: OldTagInventory, input: ProposalInput): Sta
                     }
                 }
             }
-            newValues += values.length;
+            const listed = values.slice(0, openList ? maxOpen : values.length);
+            newValues += listed.length;
             newCatalogRows.push({
                 key: plan.key,
-                values: values.join(', '),
+                values: listed.join(', '),
                 allowOther: openList,
                 defaultValue: '',
                 description: `proposed from ${plan.oldKeys.join(', ')}`,
             });
         } else if (added.length) {
-            extraValues.set(keyNorm(plan.def.key, style), added);
-            newValues += added.length;
+            const room = Math.max(0, (openList ? maxOpen : Number.MAX_SAFE_INTEGER) - plan.def.values.length);
+            const listed = added.slice(0, room);
+            if (listed.length) {
+                extraValues.set(keyNorm(plan.def.key, style), listed);
+                newValues += listed.length;
+            }
         }
         summary.push(
-            `${plan.oldKeys.join(', ')} → ${plan.key}${plan.def ? '' : ' (new key)'}${lines.length ? `: ${lines.join('; ')}` : ''}${added.length && plan.def ? ` (+${added.length} value(s))` : ''}`,
+            `${plan.oldKeys.join(', ')} → ${plan.key}${plan.def ? '' : ' (new key)'}${openList ? ' [other values allowed]' : ''}${lines.length ? `: ${lines.join('; ')}` : ''}${added.length && plan.def ? ` (+${added.length} value(s))` : ''}`,
         );
     }
 
@@ -517,8 +578,41 @@ export function proposeStandard(inv: OldTagInventory, input: ProposalInput): Sta
     catalogRows.push(...newCatalogRows);
     const newCatalog = parseTagDefinitions(catalogRows, style, input.valueField, []);
 
+    // ---- complete placeholder rows in place (split when their old values need different standard values)
+    let completedRows = 0;
+    const baseRows: unknown[] = [];
+    for (const raw of ruleRaw) {
+        const [r] = parseTagRules([raw]);
+        const placeholder = !!r && isPlaceholder(r, inv, catalog, style);
+        const plan = r ? planByOldKey.get(r.fromKey.toLowerCase()) : undefined;
+        if (!r || !placeholder || !plan) {
+            baseRows.push(raw);
+            continue;
+        }
+        const row = raw as Record<string, unknown>;
+        completedRows++;
+        if (!r.fromValues.length) {
+            baseRows.push({ ...row, toKey: r.toKey || plan.key });
+            continue;
+        }
+        const valueMap = plan.values.get(
+            plan.oldKeys.find(k => k.toLowerCase() === r.fromKey.toLowerCase()) ?? r.fromKey,
+        );
+        const byStd = new Map<string, string[]>();
+        for (const v of r.fromValues) {
+            const std =
+                valueMap?.get(v) ??
+                valueMap?.get([...valueMap.keys()].find(k => k.toLowerCase() === v.toLowerCase()) ?? '') ??
+                v;
+            byStd.set(std, [...(byStd.get(std) ?? []), v]);
+        }
+        for (const [std, olds] of byStd) {
+            baseRows.push({ ...row, fromValue: olds, toKey: r.toKey || plan.key, toValue: r.toValue || std });
+        }
+    }
+
     // ---- minimal rule rows
-    const working: TagRule[] = [...rules];
+    const working: TagRule[] = parseTagRules(baseRows);
     const added: TagRule[] = [];
     const push = (r: TagRule): void => {
         working.push(r);
@@ -536,10 +630,7 @@ export function proposeStandard(inv: OldTagInventory, input: ProposalInput): Sta
                 const w = wanted(v);
                 return !!res && keyNorm(res.key, style) === keyNorm(w.key, style) && res.value === w.value;
             };
-            const values = [...valueMap.keys()].filter(v => {
-                const idx = findTagRule({ key: oldKey, value: v }, rules);
-                return idx < 0 || !rules[idx].fromValues.length;
-            });
+            const values = [...valueMap.keys()].filter(v => !ownRule(oldKey, v));
             const hasKeyRule = working.some(
                 r => r.fromKey.toLowerCase() === oldKey.toLowerCase() && !r.fromValues.length,
             );
@@ -561,12 +652,36 @@ export function proposeStandard(inv: OldTagInventory, input: ProposalInput): Sta
             }
         }
     }
+    const ruleRows = [...baseRows, ...added.map(ruleToRow)];
+
+    // ---- coverage: every used key/value with the final rules and catalog
+    const finalRules = parseTagRules(ruleRows);
+    const coverage: Coverage = { total: 0, covered: 0, removed: 0, uncovered: [] };
+    for (const e of inv.keys.values()) {
+        for (const v of e.values.keys()) {
+            coverage.total++;
+            const idx = findTagRule({ key: e.key, value: v }, finalRules);
+            if (idx >= 0 && finalRules[idx].toKey === DROP_KEY) {
+                coverage.removed++;
+                continue;
+            }
+            const res = applyTagRules([{ key: e.key, value: v }], finalRules, newCatalog, style);
+            if (res.tags.length) {
+                coverage.covered++;
+            } else {
+                const o = res.outcomes[0];
+                coverage.uncovered.push(`${e.key}=${v}: ${o && 'reason' in o ? o.reason : 'not translated'}`);
+            }
+        }
+    }
     return {
         catalogRows,
-        ruleRows: [...ruleRaw, ...added.map(ruleToRow)],
+        ruleRows,
         newKeys: newCatalogRows.map(r => String(r.key)),
         newValues,
         newRules: added.length,
+        completedRows,
         summary,
+        coverage,
     };
 }

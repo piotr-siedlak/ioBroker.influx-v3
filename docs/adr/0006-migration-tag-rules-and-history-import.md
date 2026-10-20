@@ -169,3 +169,37 @@ Decision – button **"Propose standard (catalog + rules)"** (pure function `pro
 Plan: (a) `tagStandard.ts` with dictionaries, folding, style and `proposeStandard` + unit tests; (b) command
 `migrationProposeStandard` (inventory, room/function names, catalog/rules from the form); (c) Admin: value-style
 select, "use ioBroker rooms/functions" checkbox, button, 11 languages; (d) harness test; (e) docs.
+
+## Extension 3 (2026-10-20): the proposal covers every used tag
+
+Problem (reported): "Propose standard" covered only part of the tags. Causes found:
+
+1. Only the custom tags of the **influxdb settings** were looked at. Tags that exist only in the **old points**
+   (configured earlier and removed later) and tags of states **already configured for influx-v3** (e.g. migrated
+   before the catalog existed – ignored at runtime since then) were never proposed.
+2. Keys that **allow other values** (and new keys with many values) got no values in the catalog and their spelling
+   variants (`Pump 1` / `pump 1`) were not merged.
+3. Rows left by *Take over old tags* with **empty new key/value** counted as user decisions, so the proposal skipped
+   them and the table kept incomplete rows.
+
+Decision:
+
+1. **Inventory of used tags** from three sources, each value marked with its origin: custom tags of the influxdb
+   settings (states), tags stored in the old database (measurements; `SHOW TAG VALUES` on 1.x, `schema.tagKeys/
+   tagValues` on 2.x; connection of tab *Migration of data*, option, cached 60 s) and custom tags of the states of
+   this instance (template values `{…}` excluded). The dropdowns of the rule table use the same inventory.
+2. **Every key and value is standardised**: closed lists as before; open lists (catalog `allowOther`, or more than
+   25 distinct values) merge spelling variants too (catalog/room/function match, else the most used spelling) and
+   list their standard values in the catalog (up to 1000 per key) while still allowing other values.
+3. **Placeholder rows** (an empty new key/value that still leads to a rejected tag with the current catalog) are
+   completed in place; a placeholder whose old values need different standard values is split. Complete rows and
+   removals (`-`) stay user decisions.
+4. **Coverage check**: after the proposal every used key/value is translated with the final rules and catalog; the
+   result message reports `all N used tag values covered` or lists the uncovered ones with the reason.
+5. **Apply** can also standardise the tags of states **already configured for this instance** (option, on by
+   default): a tag is rewritten only when the rules translate it into an allowed catalog tag; other tags stay as they
+   are. The live preview lists these changes.
+
+Plan: (a) inventory with origins + `tagInventory()` in both legacy readers (unit + real 1.8/2.7 tests); (b) proposal:
+placeholders, open lists, coverage (unit tests); (c) existing-state standardisation in plan/preview/apply; (d)
+commands, options, Admin, 11 languages; (e) harness test incl. old points; (f) docs.

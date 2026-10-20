@@ -192,6 +192,8 @@
         "migrationTagRules": [],
         "migrationValueStyle": "auto",
         "migrationUseEnums": true,
+        "migrationIncludeOldPoints": true,
+        "migrationStandardizeExisting": true,
         "dmInfluxdbInstance": "",
         "dmVersion": "2.x",
         "dmUrl": "",

@@ -253,40 +253,157 @@ export function foldValue(value: string): string {
     return /^[+-]?\d+([.,]\d+)?$/.test(t) ? `#${t.replace(',', '.').replace(/^\+/, '')}` : foldText(t);
 }
 
-/** Old custom tags of the influxdb settings: key (ignoring case) → spelling, values with state counts */
+/** Where a used tag value was found */
+export type TagOrigin = 'influxdb' | 'points' | 'instance';
+
+/** One key of the inventory */
+export interface InventoryKey {
+    /** first spelling seen */
+    key: string;
+    /** states (settings) using the key */
+    states: number;
+    /** value → number of states using it in settings (0 if only found in old points) */
+    values: Map<string, number>;
+    /** value → number of old measurements containing it */
+    points: Map<string, number>;
+    /** value → sources it was found in */
+    origins: Map<string, Set<TagOrigin>>;
+}
+
+/** Used tags: key (ignoring case) → spelling, values with counts and origins */
 export interface OldTagInventory {
-    keys: Map<string, { key: string; states: number; values: Map<string, number> }>;
+    keys: Map<string, InventoryKey>;
 }
 
 /**
- * Counts the old custom tags.
+ * Adds one used tag value.
+ *
+ * @param inv inventory
+ * @param keyRaw tag key
+ * @param valueRaw tag value
+ * @param count states/measurements
+ * @param origin source
+ */
+export function addToInventory(
+    inv: OldTagInventory,
+    keyRaw: string,
+    valueRaw: unknown,
+    count: number,
+    origin: TagOrigin,
+): void {
+    const key = keyRaw.trim();
+    const value =
+        typeof valueRaw === 'string'
+            ? valueRaw.trim()
+            : typeof valueRaw === 'number' || typeof valueRaw === 'boolean'
+              ? String(valueRaw)
+              : '';
+    if (!key || !value) {
+        return;
+    }
+    const lk = key.toLowerCase();
+    let e = inv.keys.get(lk);
+    if (!e) {
+        e = { key, states: 0, values: new Map(), points: new Map(), origins: new Map() };
+        inv.keys.set(lk, e);
+    }
+    e.values.set(value, (e.values.get(value) ?? 0) + (origin === 'points' ? 0 : count));
+    if (origin === 'points') {
+        e.points.set(value, (e.points.get(value) ?? 0) + count);
+    }
+    const o = e.origins.get(value) ?? new Set<TagOrigin>();
+    o.add(origin);
+    e.origins.set(value, o);
+}
+
+/**
+ * Counts the custom tags of states.
  *
  * @param tagsPerState custom tags of every state
+ * @param origin source of the settings
+ * @param into inventory to add to (new one if omitted)
  */
-export function buildOldTagInventory(tagsPerState: readonly (readonly TagPair[])[]): OldTagInventory {
-    const keys: OldTagInventory['keys'] = new Map();
+export function buildOldTagInventory(
+    tagsPerState: readonly (readonly TagPair[])[],
+    origin: TagOrigin = 'influxdb',
+    into: OldTagInventory = { keys: new Map() },
+): OldTagInventory {
     for (const tags of tagsPerState) {
         const seen = new Set<string>();
         for (const t of tags) {
             const key = t.key.trim();
-            const value = String(t.value ?? '').trim();
-            if (!key || !value) {
+            if (!key || !String(t.value ?? '').trim()) {
                 continue;
             }
+            addToInventory(into, key, t.value, 1, origin);
             const lk = key.toLowerCase();
-            let e = keys.get(lk);
-            if (!e) {
-                e = { key, states: 0, values: new Map() };
-                keys.set(lk, e);
-            }
             if (!seen.has(lk)) {
-                e.states++;
+                into.keys.get(lk)!.states++;
                 seen.add(lk);
             }
-            e.values.set(value, (e.values.get(value) ?? 0) + 1);
         }
     }
-    return { keys };
+    return into;
+}
+
+/**
+ * Merges inventories (counts are added, origins united).
+ *
+ * @param list inventories
+ */
+export function mergeInventories(...list: OldTagInventory[]): OldTagInventory {
+    const out: OldTagInventory = { keys: new Map() };
+    for (const inv of list) {
+        for (const e of inv.keys.values()) {
+            for (const [value, count] of e.values) {
+                for (const origin of e.origins.get(value) ?? ['influxdb' as const]) {
+                    addToInventory(out, e.key, value, 0, origin);
+                }
+                const target = out.keys.get(e.key.toLowerCase())!;
+                target.values.set(value, (target.values.get(value) ?? 0) + count);
+                target.points.set(value, (target.points.get(value) ?? 0) + (e.points.get(value) ?? 0));
+                if (!target.points.get(value)) {
+                    target.points.delete(value);
+                }
+            }
+            const target = out.keys.get(e.key.toLowerCase());
+            if (target) {
+                target.states += e.states;
+            }
+        }
+    }
+    return out;
+}
+
+/**
+ * How often a value is used (settings and old measurements) - for choosing the most used spelling.
+ *
+ * @param e inventory key
+ * @param value value
+ */
+export function useCount(e: InventoryKey, value: string): number {
+    return (e.values.get(value) ?? 0) + (e.points.get(value) ?? 0);
+}
+
+/**
+ * Short text of the use of a value, e.g. `3 state(s)`, `3 state(s), 5 old measurement(s)`.
+ *
+ * @param e inventory key
+ * @param value value
+ */
+export function describeUse(e: InventoryKey, value: string): string {
+    const parts: string[] = [];
+    const states = e.values.get(value) ?? 0;
+    const points = e.points.get(value) ?? 0;
+    if (states) {
+        parts.push(`${states} state(s)`);
+    }
+    if (points) {
+        parts.push(`${points} old measurement(s)`);
+    } else if (e.origins.get(value)?.has('points')) {
+        parts.push('old points'); // InfluxDB 2.x cannot count the measurements cheaply
+    }
+    return parts.join(', ') || 'used';
 }
 
 /**
