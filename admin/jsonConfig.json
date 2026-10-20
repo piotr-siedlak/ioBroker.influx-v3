@@ -1839,7 +1839,7 @@
                     "label": "Propose standard (catalog + rules)",
                     "jsonData": "{\"source\": ${JSON.stringify(data.migrationSource || '')}, \"rules\": ${JSON.stringify(data.migrationTagRules || [])}, \"catalog\": ${JSON.stringify(data.tagDefinitions || [])}, \"valueStyle\": ${JSON.stringify(data.migrationValueStyle || 'auto')}, \"useEnums\": ${data.migrationUseEnums !== false}, \"includeOldPoints\": ${data.migrationIncludeOldPoints !== false}}",
                     "result": {
-                        "standardProposed": "res_standard_proposed",
+                        "standardProposedShort": "res_standard_proposed_short",
                         "standardNothing": "res_standard_nothing",
                         "noOldTags": "res_no_old_tags"
                     },
@@ -1866,6 +1866,19 @@
                     "xs": 12,
                     "lg": 4,
                     "xl": 4
+                },
+                "_proposalResult": {
+                    "type": "state",
+                    "oid": "info.migrationProposal",
+                    "control": "html",
+                    "newLine": true,
+                    "sm": 12,
+                    "label": "Result of the last proposal",
+                    "hidden": "!_alive",
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
                 },
                 "migrationTagRules": {
                     "type": "table",

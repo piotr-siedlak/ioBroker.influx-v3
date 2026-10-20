@@ -559,7 +559,7 @@ tests.integration(path.join(__dirname, '..'), {
                     valueStyle: 'upper',
                     useEnums: true,
                 });
-                assert.equal(res.result, 'standardProposed', JSON.stringify(res));
+                assert.equal(res.result, 'standardProposedShort', JSON.stringify(res));
                 const cat = res.native.tagDefinitions;
                 const rules = res.native.migrationTagRules;
                 const location = cat.find(d => d.key === 'Location');
@@ -568,7 +568,16 @@ tests.integration(path.join(__dirname, '..'), {
                 assert.ok(rules.some(r => r.fromKey === 'room' && r.fromValue.length === 0 && r.toKey === 'Location'), 'room → Location (synonym)');
                 assert.ok(rules.some(r => r.fromValue.includes('Kotłownia') && r.toValue === 'KOTLOWNIA'));
                 assert.ok(rules.some(r => r.fromValue.includes('Garaż') && r.toValue === 'GARAZ'));
-                assert.match(res.args[3], /room → Location/);
+                assert.match(res.args[3], /^All \d+ used tag value\(s\) are covered/, 'short message');
+                const details = (await harness.states.getStateAsync('influx-v3.0.info.migrationProposal')).val;
+                assert.match(details, /room.* → Location/, 'details panel');
+                // complete map: every old key has a key row, every used value a row of its own
+                for (const k of await sendTo(harness, 'getOldTagKeys', { source: 'influxdb.0' })) {
+                    assert.ok(rules.some(r => r.fromKey === k.value && r.fromValue.length === 0), `key row for ${k.value}`);
+                    for (const v of await sendTo(harness, 'getOldTagValues', { source: 'influxdb.0', key: k.value })) {
+                        assert.ok(rules.some(r => r.fromKey === k.value && r.fromValue.includes(v.value)), `row for ${k.value}=${v.value}`);
+                    }
+                }
                 // with the proposal every old tag fits: the preview lists nothing that would be dropped
                 const preview = await sendTo(harness, 'migrationPreviewHtml', { source: 'influxdb.0', overwrite: true, rules, catalog: cat });
                 assert.ok(!/NOT written/.test(preview.text), preview.text);
@@ -586,7 +595,7 @@ tests.integration(path.join(__dirname, '..'), {
                     valueStyle: 'upper',
                     includeOldPoints: !!V2,
                 });
-                assert.equal(res.result, 'standardProposed', JSON.stringify(res));
+                assert.equal(res.result, 'standardProposedShort', JSON.stringify(res));
                 assert.match(res.args[3], /^All \d+ used tag value\(s\) are covered/, res.args[3]);
                 assert.equal(res.coverage.uncovered.length, 0);
                 if (V2) {

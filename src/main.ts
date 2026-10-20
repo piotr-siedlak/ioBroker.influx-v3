@@ -1896,26 +1896,29 @@ export class InfluxV3Adapter extends utils.Adapter {
         const coverage =
             c.uncovered.length === 0
                 ? `All ${c.total} used tag value(s) are covered${c.removed ? ` (${c.removed} removed by rules)` : ''}.`
-                : `${c.covered} of ${c.total} used tag value(s) covered, ${c.uncovered.length} not:\n${c.uncovered
-                      .slice(0, 20)
-                      .map(u => `  ${u}`)
-                      .join('\n')}`;
-        const text = [
-            coverage,
-            ...notes,
-            p.completedRows ? `${p.completedRows} incomplete row(s) filled in.` : '',
+                : `${c.covered} of ${c.total} used tag value(s) are covered, ${c.uncovered.length} not.`;
+        const nothing = !p.newKeys.length && !p.newValues && !p.newRules && !p.completedRows;
+        const details = [
+            `Proposal of ${new Date().toLocaleString()}`,
             '',
-            ...p.summary,
-        ]
-            .filter((l, i) => l || i > 0)
-            .join('\n');
-        if (!p.newKeys.length && !p.newValues && !p.newRules && !p.completedRows) {
+            coverage,
+            ...c.uncovered.map(u => `  not covered: ${u}`),
+            ...notes,
+            nothing
+                ? 'Nothing new to propose.'
+                : `${p.newKeys.length} new key(s), ${p.newValues} new value(s), ${p.newRules} rule row(s) added${p.completedRows ? `, ${p.completedRows} incomplete row(s) filled in` : ''}.`,
+            '',
+            'Old key → new key: old values → standard value',
+            ...p.summary.map(l => `  ${l}`),
+        ].join('\n');
+        await this.setStateAsync('info.migrationProposal', preformattedHtml(details), true);
+        if (nothing) {
             return this.reply(msg, { result: 'standardNothing', args: [], coverage: c });
         }
         this.reply(msg, {
             native: { tagDefinitions: p.catalogRows, migrationTagRules: p.ruleRows },
-            result: 'standardProposed',
-            args: [String(p.newKeys.length), String(p.newValues), String(p.newRules), text],
+            result: 'standardProposedShort',
+            args: [String(p.newKeys.length), String(p.newValues), String(p.newRules), coverage],
             summary: p.summary,
             coverage: c,
         });

@@ -16,6 +16,7 @@ import {
     type OldTagInventory,
     parseTagRules,
     ruleToRow,
+    ruleValues,
     type TagRule,
     useCount,
 } from './tagMapping';
@@ -325,6 +326,33 @@ export interface ProposalInput {
     maxListValues?: number;
     /** values listed in the catalog for keys that allow other values */
     maxOpenListValues?: number;
+    /** keys with more distinct values only get rule rows for values that change */
+    maxExplicitValues?: number;
+}
+
+/**
+ * Groups the rule table by old key (stable: the order of rows with the same old key - and therefore which rule
+ * wins - is kept); per key the "every value" rows first. Rows without old key stay at the end.
+ *
+ * @param rows rule rows as in the form
+ */
+export function sortRuleRows(rows: unknown[]): unknown[] {
+    const keyOf = (r: unknown): string => {
+        const k = (r as { fromKey?: unknown } | null)?.fromKey;
+        return typeof k === 'string' ? k.trim().toLowerCase() : '';
+    };
+    const isEvery = (r: unknown): boolean => !ruleValues((r as { fromValue?: unknown } | null)?.fromValue).length;
+    return rows
+        .map((r, i) => ({ r, i }))
+        .sort((a, b) => {
+            const ka = keyOf(a.r);
+            const kb = keyOf(b.r);
+            if (!ka || !kb) {
+                return !ka && !kb ? a.i - b.i : ka ? -1 : 1;
+            }
+            return ka.localeCompare(kb) || Number(isEvery(b.r)) - Number(isEvery(a.r)) || a.i - b.i;
+        })
+        .map(x => x.r);
 }
 
 export interface Coverage {
@@ -468,6 +496,19 @@ export function proposeStandard(inv: OldTagInventory, input: ProposalInput): Sta
         plan.values.set(e.key, new Map([...e.values.keys()].map(v => [v, undefined])));
     }
 
+    // ---- target values of complete rules (user decisions, rows of earlier proposals) must exist in the catalog
+    const ruleTargets = new Map<string, { key: string; values: string[] }>();
+    for (const r of rules) {
+        if (r.toKey && r.toKey !== DROP_KEY && r.toValue) {
+            const n = keyNorm(r.toKey, style);
+            const t = ruleTargets.get(n) ?? { key: r.toKey, values: [] };
+            if (!t.values.includes(r.toValue)) {
+                t.values.push(r.toValue);
+            }
+            ruleTargets.set(n, t);
+        }
+    }
+
     // ---- values per standard key (closed and open lists)
     const newCatalogRows: Record<string, unknown>[] = [];
     const extraValues = new Map<string, string[]>(); // existing catalog key (normalised) → appended values
@@ -502,10 +543,17 @@ export function proposeStandard(inv: OldTagInventory, input: ProposalInput): Sta
         for (const v of plan.def?.values ?? []) {
             addCandidate(v);
         }
+        const added: string[] = [];
+        for (const v of ruleTargets.get(keyNorm(plan.key, style))?.values ?? []) {
+            if (!candidates.some(c => c.std === v)) {
+                addCandidate(v);
+                added.push(v);
+            }
+        }
+        ruleTargets.delete(keyNorm(plan.key, style));
         const kg = keyGroup(plan.key);
         const enumNames = kg === 'location' ? (input.rooms ?? []) : kg === 'function' ? (input.functions ?? []) : [];
         const enumCandidates = enumNames.map(n => ({ name: n, fold: foldValue(n), group: valueGroup(n) }));
-        const added: string[] = [];
         const perStd = new Map<string, string[]>(); // standard value → old spellings (for the summary)
         const sortedGroups = [...groups.entries()].sort((a, b) => b[1].count - a[1].count || a[0].localeCompare(b[0]));
         for (const [fold, g] of sortedGroups) {
@@ -566,6 +614,30 @@ export function proposeStandard(inv: OldTagInventory, input: ProposalInput): Sta
         );
     }
 
+    // rule targets of keys without old tags of their own
+    for (const t of ruleTargets.values()) {
+        const def = catalog.find(d => keyNorm(d.key, style) === keyNorm(t.key, style));
+        if (def) {
+            if (!def.allowOther || def.values.length < maxOpen) {
+                const missing = t.values.filter(v => !def.values.includes(v));
+                if (missing.length) {
+                    const n = keyNorm(def.key, style);
+                    extraValues.set(n, [...(extraValues.get(n) ?? []), ...missing]);
+                    newValues += missing.length;
+                }
+            }
+        } else if (!reserved.has(keyNorm(t.key, style))) {
+            newCatalogRows.push({
+                key: t.key,
+                values: t.values.join(', '),
+                allowOther: false,
+                defaultValue: '',
+                description: 'from the tag rules',
+            });
+            newValues += t.values.length;
+        }
+    }
+
     // ---- catalog rows: existing rows kept, missing values appended, new keys added
     const catalogRows = catalogRaw.map(row => {
         const extra = typeof row.key === 'string' ? extraValues.get(keyNorm(row.key, style)) : undefined;
@@ -611,15 +683,29 @@ export function proposeStandard(inv: OldTagInventory, input: ProposalInput): Sta
         }
     }
 
-    // ---- minimal rule rows
+    // ---- complete mapping: per old key one "every value" row (key translation, also for values that appear
+    //      later) and per standard value one row with all its old spellings - also where the automatic spelling
+    //      would already give the result, so that every used key and value is visible and editable in the table.
+    //      Keys with very many values (identifiers) only get rows for values that change.
     const working: TagRule[] = parseTagRules(baseRows);
     const added: TagRule[] = [];
+    const sameRow = (a: TagRule, b: TagRule): boolean =>
+        a.fromKey.toLowerCase() === b.fromKey.toLowerCase() &&
+        keyNorm(a.toKey, style) === keyNorm(b.toKey, style) &&
+        a.toValue === b.toValue &&
+        a.fromValues.length === b.fromValues.length &&
+        a.fromValues.every(v => b.fromValues.some(x => x.toLowerCase() === v.toLowerCase()));
     const push = (r: TagRule): void => {
-        working.push(r);
-        added.push(r);
+        if (!working.some(w => sameRow(w, r))) {
+            working.push(r);
+            added.push(r);
+        }
     };
-    for (const plan of plans.values()) {
-        for (const oldKey of plan.oldKeys) {
+    const maxExplicit = input.maxExplicitValues ?? 100;
+    const sortedPlans = [...plans.values()].sort((a, b) => a.key.localeCompare(b.key));
+    for (const plan of sortedPlans) {
+        for (const oldKey of [...plan.oldKeys].sort((a, b) => a.localeCompare(b))) {
+            const lk = oldKey.toLowerCase();
             const valueMap = plan.values.get(oldKey) ?? new Map<string, string | undefined>();
             const wanted = (v: string): { key: string; value: string } => ({
                 key: plan.key,
@@ -630,29 +716,30 @@ export function proposeStandard(inv: OldTagInventory, input: ProposalInput): Sta
                 const w = wanted(v);
                 return !!res && keyNorm(res.key, style) === keyNorm(w.key, style) && res.value === w.value;
             };
-            const values = [...valueMap.keys()].filter(v => !ownRule(oldKey, v));
-            const hasKeyRule = working.some(
-                r => r.fromKey.toLowerCase() === oldKey.toLowerCase() && !r.fromValues.length,
-            );
-            if (!hasKeyRule && keyNorm(oldKey, style) !== keyNorm(plan.key, style) && values.some(v => !fits(v))) {
+            if (!working.some(r => r.fromKey.toLowerCase() === lk && !r.fromValues.length)) {
                 push({ fromKey: oldKey, fromValues: [], toKey: plan.key, toValue: '' });
             }
+            // a value with a row of its own (user decision, completed placeholder, earlier proposal) is mapped
+            const hasRow = (v: string): boolean =>
+                working.some(
+                    r => r.fromKey.toLowerCase() === lk && r.fromValues.some(x => x.toLowerCase() === v.toLowerCase()),
+                );
+            const values = [...valueMap.keys()].filter(v => !ownRule(oldKey, v) && !hasRow(v));
+            const explicitAll = new Set([...valueMap.values()]).size <= maxExplicit;
             const byStd = new Map<string, string[]>();
-            for (const v of values) {
-                if (fits(v)) {
+            for (const v of values.sort((a, b) => a.localeCompare(b))) {
+                if (!explicitAll && fits(v)) {
                     continue;
                 }
                 const std = wanted(v).value;
-                const list = byStd.get(std) ?? [];
-                list.push(v);
-                byStd.set(std, list);
+                byStd.set(std, [...(byStd.get(std) ?? []), v]);
             }
-            for (const [std, olds] of byStd) {
-                push({ fromKey: oldKey, fromValues: olds, toKey: plan.key, toValue: std });
+            for (const std of [...byStd.keys()].sort((a, b) => a.localeCompare(b))) {
+                push({ fromKey: oldKey, fromValues: byStd.get(std) ?? [], toKey: plan.key, toValue: std });
             }
         }
     }
-    const ruleRows = [...baseRows, ...added.map(ruleToRow)];
+    const ruleRows = sortRuleRows([...baseRows, ...added.map(ruleToRow)]);
 
     // ---- coverage: every used key/value with the final rules and catalog
     const finalRules = parseTagRules(ruleRows);

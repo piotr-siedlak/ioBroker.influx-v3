@@ -203,3 +203,17 @@ Decision:
 Plan: (a) inventory with origins + `tagInventory()` in both legacy readers (unit + real 1.8/2.7 tests); (b) proposal:
 placeholders, open lists, coverage (unit tests); (c) existing-state standardisation in plan/preview/apply; (d)
 commands, options, Admin, 11 languages; (e) harness test incl. old points; (f) docs.
+
+## Extension 4 (2026-10-20): complete mapping table
+
+Reported with a screenshot: after "Propose standard" the rule table showed rows only for some values. Cause: the
+proposal wrote the *minimal* rules – no row where the automatic case-only spelling already gave the result
+(`Device` → `device`, `Loxone` → `LOXONE`), so most keys and values were invisible in the table. Also, the target
+value of a complete row from an earlier run was not added to the catalog when that value was missing there.
+
+Decision: the proposal writes a **complete mapping**: per old key one "every value" row (key translation, also for
+values that appear later) and per standard value one row with all its old spellings – including unchanged values.
+Keys with more than 100 distinct values (identifiers) only get rows for values that change. The table is grouped by
+old key (stable sort, so the rule that wins does not change). Target values of complete rules always join the
+catalog. The message stays short; the full result (coverage, every key with its value mapping) is shown in the panel
+*Result of the last proposal* (`info.migrationProposal`).

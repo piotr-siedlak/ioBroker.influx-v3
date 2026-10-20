@@ -434,6 +434,23 @@
             "native": {}
         },
         {
+            "_id": "info.migrationProposal",
+            "type": "state",
+            "common": {
+                "role": "html",
+                "name": {
+                    "en": "Result of the last tag proposal",
+                    "de": "Ergebnis des letzten Tag-Vorschlags",
+                    "pl": "Wynik ostatniej propozycji tagów"
+                },
+                "type": "string",
+                "read": true,
+                "write": false,
+                "def": ""
+            },
+            "native": {}
+        },
+        {
             "_id": "info.dataMigration",
             "type": "channel",
             "common": {

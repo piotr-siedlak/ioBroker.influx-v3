@@ -17,6 +17,7 @@ import {
     type ProposalInput,
     resolveValueStyle,
     sameKey,
+    sortRuleRows,
     styleValue,
     valueGroup,
 } from '../../src/lib/tagStandard';
@@ -113,7 +114,31 @@ describe('proposed standard for old tags (tagStandard)', () => {
         });
     });
 
-    it('empty catalog: proposes keys, standard values (incl. ioBroker rooms) and the minimal rules', () => {
+    type Row = { fromKey: string; fromValue: string[]; toKey: string; toValue: string };
+    const rowsOf = (p: { ruleRows: unknown[] }): Row[] => p.ruleRows as Row[];
+    /** the explicit row of an old key/value */
+    const rowFor = (p: { ruleRows: unknown[] }, key: string, value: string): Row | undefined =>
+        rowsOf(p).find(r => r.fromKey === key && r.fromValue.includes(value));
+    /** every old key has a key row, every used value an explicit row, the table is grouped by old key */
+    function assertCompleteMap(p: { ruleRows: unknown[] }, inventory = inv): void {
+        for (const e of inventory.keys.values()) {
+            assert.ok(
+                rowsOf(p).some(r => r.fromKey === e.key && !r.fromValue.length),
+                `key row for ${e.key}`,
+            );
+            for (const v of e.values.keys()) {
+                assert.ok(rowFor(p, e.key, v), `row for ${e.key}=${v}`);
+            }
+        }
+        const keys = rowsOf(p).map(r => r.fromKey.toLowerCase());
+        assert.deepEqual(
+            keys,
+            [...keys].sort((a, b) => a.localeCompare(b)),
+            'grouped by old key',
+        );
+    }
+
+    it('empty catalog: proposes keys, standard values (incl. ioBroker rooms) and a complete mapping', () => {
         const p = proposeStandard(inv, input());
         assert.deepEqual(p.newKeys, ['location', 'floor', 'source']);
         assert.deepEqual(p.catalogRows, [
@@ -139,14 +164,29 @@ describe('proposed standard for old tags (tagStandard)', () => {
                 description: 'proposed from source',
             },
         ]);
-        assert.deepEqual(p.ruleRows, [
-            { fromKey: 'room', fromValue: [], toKey: 'location', toValue: '' },
-            { fromKey: 'room', fromValue: ['Kotłownia', 'Heizungsraum'], toKey: 'location', toValue: 'KOTLOWNIA' },
-            { fromKey: 'room', fromValue: ['Garaż'], toKey: 'location', toValue: 'GARAZ' },
-            { fromKey: 'Raum', fromValue: [], toKey: 'location', toValue: '' },
-            { fromKey: 'Raum', fromValue: ['Küche'], toKey: 'location', toValue: 'KUCHNIA' },
-        ]);
-        assert.equal(p.newRules, 5);
+        assertCompleteMap(p);
+        // one row per standard value with all its old spellings - also where only the case differs
+        assert.deepEqual(rowFor(p, 'room', 'Kotłownia'), {
+            fromKey: 'room',
+            fromValue: ['Heizungsraum', 'kotlownia', 'Kotłownia'],
+            toKey: 'location',
+            toValue: 'KOTLOWNIA',
+        });
+        assert.deepEqual(rowFor(p, 'room', 'Salon'), {
+            fromKey: 'room',
+            fromValue: ['Salon'],
+            toKey: 'location',
+            toValue: 'SALON',
+        });
+        assert.deepEqual(rowFor(p, 'Raum', 'Küche'), {
+            fromKey: 'Raum',
+            fromValue: ['Küche'],
+            toKey: 'location',
+            toValue: 'KUCHNIA',
+        });
+        assert.equal(rowFor(p, 'floor', '-1')?.toValue, '-1');
+        assert.equal(rowFor(p, 'source', 'zigbee')?.toValue, 'ZIGBEE');
+        assert.equal(p.newRules, p.ruleRows.length);
         assert.ok(
             p.summary.some(
                 l =>
@@ -159,7 +199,7 @@ describe('proposed standard for old tags (tagStandard)', () => {
             allFit(p).every(l => !l.endsWith('✗')),
             allFit(p).join('\n'),
         );
-        assert.ok(allFit(p).includes('room=Heizungsraum → location=KOTLOWNIA'));
+        assert.deepEqual(p.coverage, { total: 10, covered: 10, removed: 0, uncovered: [] });
     });
 
     it('existing catalog: matches synonyms to its keys and values, appends only missing values', () => {
@@ -181,15 +221,19 @@ describe('proposed standard for old tags (tagStandard)', () => {
             { ...catalogRows[1], values: '1, 2, -1' },
             { ...catalogRows[2], values: 'zigbee' }, // open list: used values are listed too
         ]);
-        const rules = p.ruleRows as { fromKey: string; fromValue: string[]; toKey: string; toValue: string }[];
-        assert.ok(rules.some(r => r.fromKey === 'room' && r.fromValue.length === 0 && r.toKey === 'Location'));
-        assert.ok(rules.some(r => r.fromKey === 'floor' && r.fromValue.length === 0 && r.toKey === 'Etage'));
-        assert.ok(!rules.some(r => r.fromKey === 'source'), 'source fits as it is (other values allowed)');
+        assertCompleteMap(p);
+        assert.equal(rowFor(p, 'room', 'Garaż')?.toKey, 'Location');
+        assert.equal(rowFor(p, 'floor', '2')?.toKey, 'Etage');
+        assert.deepEqual(rowFor(p, 'source', 'zigbee'), {
+            fromKey: 'source',
+            fromValue: ['zigbee'],
+            toKey: 'source',
+            toValue: 'zigbee',
+        });
         assert.ok(
             allFit(p).every(l => !l.endsWith('✗')),
             allFit(p).join('\n'),
         );
-        assert.ok(allFit(p).includes('source=zigbee → source=zigbee'));
     });
 
     it('user rules win: removed keys stay removed, values with own rules are left alone', () => {
@@ -199,17 +243,36 @@ describe('proposed standard for old tags (tagStandard)', () => {
         ];
         const p = proposeStandard(inv, input({ ruleRows }));
         assert.deepEqual(p.newKeys, ['location', 'floor']);
-        assert.deepEqual(p.ruleRows.slice(0, 2), ruleRows, 'existing rows unchanged and first');
-        const rows = p.ruleRows.slice(2) as { fromKey: string; fromValue: string[] }[];
-        assert.ok(!rows.some(r => r.fromValue.includes('Garaż')));
-        assert.ok(!rows.some(r => r.fromKey === 'source'));
+        for (const r of ruleRows) {
+            assert.ok(
+                rowsOf(p).some(x => JSON.stringify(x) === JSON.stringify(r)),
+                'existing row kept unchanged',
+            );
+        }
+        assert.deepEqual(
+            rowsOf(p).filter(r => r.fromKey === 'source'),
+            [ruleRows[0]],
+            'removed key: no further rows',
+        );
+        assert.deepEqual(
+            rowsOf(p).filter(r => r.fromValue.includes('Garaż')),
+            [ruleRows[1]],
+            'value with own rule: no further rows',
+        );
         assert.ok(allFit(p).includes('room=Garaż → location=SALON'));
+    });
+
+    it('rows of an earlier proposal are kept and their target values become catalog values', () => {
+        const earlier = [{ fromKey: 'room', fromValue: ['Garaż'], toKey: 'location', toValue: 'GARAGE_NEW' }];
+        const p = proposeStandard(inv, input({ ruleRows: earlier, rooms: [] }));
+        assert.match(String(p.catalogRows[0].values), /\bGARAGE_NEW\b/);
+        assert.deepEqual(p.coverage.uncovered, []);
     });
 
     it('a second run proposes nothing more', () => {
         const first = proposeStandard(inv, input());
         const second = proposeStandard(inv, input({ catalogRows: first.catalogRows, ruleRows: first.ruleRows }));
-        assert.deepEqual([second.newKeys, second.newValues, second.newRules], [[], 0, 0]);
+        assert.deepEqual([second.newKeys, second.newValues, second.newRules, second.completedRows], [[], 0, 0, 0]);
     });
 
     it('reserved key names get a suffix; many distinct values make an open list', () => {
@@ -231,14 +294,35 @@ describe('proposed standard for old tags (tagStandard)', () => {
                 ['value_tag', false, 'X'],
             ],
         );
-        assert.ok(!p.ruleRows.some(r => (r as { fromKey: string }).fromKey === 'serial'), 'open list: values kept');
+        assertCompleteMap(p, many);
+        // above the explicit limit only values that change get rows of their own
+        const limited = proposeStandard(many, input({ rooms: [], maxExplicitValues: 10 }));
+        assert.deepEqual(
+            rowsOf(limited).filter(r => r.fromKey === 'serial'),
+            [{ fromKey: 'serial', fromValue: [], toKey: 'serial', toValue: '' }],
+        );
     });
 
     it('lower and as-used spelling', () => {
         const lower = proposeStandard(inv, input({ valueStyle: 'lower', rooms: [] }));
-        assert.match(String(lower.catalogRows[0].values), /^kotlownia, garaz, heizungsraum|^kotlownia, garaz/);
+        assert.match(String(lower.catalogRows[0].values), /^kotlownia, garaz/);
         const used = proposeStandard(inv, input({ valueStyle: 'asUsed', rooms: [] }));
         assert.equal(String(used.catalogRows[0].values).split(', ')[0], 'Kotłownia');
+    });
+
+    it('the rule table is grouped by old key without changing which rule wins', () => {
+        const rows = sortRuleRows([
+            { fromKey: 'room', fromValue: ['a'], toKey: 'x', toValue: '1' },
+            { fromKey: 'Floor', fromValue: [], toKey: 'f', toValue: '' },
+            { fromKey: 'room', fromValue: [], toKey: 'x', toValue: '' },
+            { fromKey: 'room', fromValue: ['a'], toKey: 'x', toValue: '2' },
+            { fromKey: '', fromValue: [], toKey: '', toValue: '' },
+            { fromKey: 'floor', fromValue: [], toKey: 'g', toValue: '' },
+        ]) as Row[];
+        assert.deepEqual(
+            rows.map(r => `${r.fromKey}:${r.fromValue.join('|')}:${r.toKey}${r.toValue}`),
+            ['Floor::f', 'floor::g', 'room::x', 'room:a:x1', 'room:a:x2', '::'],
+        );
     });
 
     describe('every used tag is covered (extension 3)', () => {
@@ -253,10 +337,10 @@ describe('proposed standard for old tags (tagStandard)', () => {
                 'placeholder present',
             );
             const p = proposeStandard(inv, input({ catalogRows, ruleRows: taken, rooms: [] }));
-            const rows = p.ruleRows as { fromKey: string; fromValue: string[]; toKey: string; toValue: string }[];
             assert.ok(p.completedRows >= 2);
-            assert.ok(!rows.some(r => r.toKey === '' && r.toValue === ''), JSON.stringify(rows));
-            assert.equal(rows.find(r => r.fromKey === 'floor' && !r.fromValue.length)?.toKey, 'floor');
+            assert.ok(!rowsOf(p).some(r => r.toKey === '' && r.toValue === ''), JSON.stringify(rowsOf(p)));
+            assert.equal(rowsOf(p).find(r => r.fromKey === 'floor' && !r.fromValue.length)?.toKey, 'floor');
+            assertCompleteMap(p);
             assert.equal(p.coverage.uncovered.length, 0, p.coverage.uncovered.join('\n'));
             assert.equal(p.coverage.covered, p.coverage.total);
         });
@@ -267,15 +351,29 @@ describe('proposed standard for old tags (tagStandard)', () => {
             ];
             const ruleRows = [{ fromKey: 'room', fromValue: ['Kotłownia', 'Garaż'], toKey: 'Location', toValue: '' }];
             const p = proposeStandard(inv, input({ catalogRows, ruleRows, rooms: [] }));
-            const rows = p.ruleRows as { fromKey: string; fromValue: string[]; toKey: string; toValue: string }[];
-            assert.deepEqual(rows.slice(0, 2), [
-                { fromKey: 'room', fromValue: ['Kotłownia'], toKey: 'Location', toValue: 'KOTLOWNIA' },
-                { fromKey: 'room', fromValue: ['Garaż'], toKey: 'Location', toValue: 'GARAZ' },
-            ]);
+            assert.ok(
+                rowsOf(p).some(
+                    r =>
+                        JSON.stringify(r) ===
+                        JSON.stringify({
+                            fromKey: 'room',
+                            fromValue: ['Kotłownia'],
+                            toKey: 'Location',
+                            toValue: 'KOTLOWNIA',
+                        }),
+                ),
+            );
+            assert.ok(
+                rowsOf(p).some(
+                    r =>
+                        JSON.stringify(r) ===
+                        JSON.stringify({ fromKey: 'room', fromValue: ['Garaż'], toKey: 'Location', toValue: 'GARAZ' }),
+                ),
+            );
             assert.equal(p.coverage.uncovered.length, 0, p.coverage.uncovered.join('\n'));
         });
 
-        it('open lists: spelling variants are merged and the used values are listed', () => {
+        it('open lists: spelling variants are merged and every used value is mapped and listed', () => {
             const devices = buildOldTagInventory([
                 [{ key: 'device', value: 'Pump 1' }],
                 [{ key: 'device', value: 'Pump 1' }],
@@ -285,8 +383,19 @@ describe('proposed standard for old tags (tagStandard)', () => {
             const catalogRows = [{ key: 'device', values: '', allowOther: true, defaultValue: '', description: '' }];
             const p = proposeStandard(devices, input({ catalogRows }));
             assert.equal(p.catalogRows[0].values, 'Pump 1, Boiler');
-            // case-only variants need no rule of their own: the catalog spelling is applied automatically
-            assert.deepEqual(p.ruleRows, [{ fromKey: 'Gerät', fromValue: [], toKey: 'device', toValue: '' }]);
+            assertCompleteMap(p, devices);
+            assert.deepEqual(rowFor(p, 'Gerät', 'pump 1'), {
+                fromKey: 'Gerät',
+                fromValue: ['pump 1'],
+                toKey: 'device',
+                toValue: 'Pump 1',
+            });
+            assert.deepEqual(rowFor(p, 'device', 'Boiler'), {
+                fromKey: 'device',
+                fromValue: ['Boiler'],
+                toKey: 'device',
+                toValue: 'Boiler',
+            });
             const cat = parseTagDefinitions(p.catalogRows, 'snake', 'value', []);
             assert.deepEqual(
                 applyTagRules([{ key: 'Gerät', value: 'pump 1' }], parseTagRules(p.ruleRows), cat, 'snake').tags,
@@ -295,20 +404,26 @@ describe('proposed standard for old tags (tagStandard)', () => {
             assert.deepEqual(p.coverage, { total: 3, covered: 3, removed: 0, uncovered: [] });
         });
 
-        it('coverage counts removed tags and reports what a user rule leaves invalid', () => {
+        it('coverage counts removed tags; target values of complete rules join the catalog', () => {
             const catalogRows = [
                 { key: 'Location', values: 'KOTLOWNIA, SALON', allowOther: false, defaultValue: '', description: '' },
             ];
             const ruleRows = [
                 { fromKey: 'source', fromValue: [], toKey: '-', toValue: '' },
-                { fromKey: 'room', fromValue: ['Garaż'], toKey: 'Location', toValue: 'NOPE' },
+                { fromKey: 'room', fromValue: ['Garaż'], toKey: 'Location', toValue: 'NOWY' },
             ];
             const p = proposeStandard(inv, input({ catalogRows, ruleRows, rooms: [] }));
             assert.equal(p.coverage.removed, 1);
-            assert.deepEqual(p.coverage.uncovered, [
-                'room=Garaż: value "NOPE" is not allowed for "Location" (allowed: KOTLOWNIA, SALON, KUCHE)',
-            ]);
-            assert.equal(p.coverage.covered + p.coverage.removed + p.coverage.uncovered.length, p.coverage.total);
+            assert.deepEqual(p.coverage.uncovered, []);
+            assert.match(String(p.catalogRows[0].values), /\bNOWY\b/);
+            assert.equal(p.coverage.covered + p.coverage.removed, p.coverage.total);
+        });
+
+        it('coverage reports what cannot be made valid (rule to a reserved key)', () => {
+            const ruleRows = [{ fromKey: 'room', fromValue: ['Garaż'], toKey: 'state_id', toValue: 'x' }];
+            const p = proposeStandard(inv, input({ ruleRows, rooms: [] }));
+            assert.equal(p.coverage.uncovered.length, 1);
+            assert.match(p.coverage.uncovered[0], /^room=Garaż: key "state_id" is not defined in the tag catalog/);
         });
 
         it('tags of old points and of this instance join the inventory with their origin', () => {
@@ -331,12 +446,8 @@ describe('proposed standard for old tags (tagStandard)', () => {
             assert.ok(!all.keys.has('ack') && !all.keys.has('_field'));
             assert.deepEqual([...all.keys.get('location')!.origins.get('kotlownia')!], ['instance']);
             const p = proposeStandard(all, input());
-            assert.ok(
-                p.summary.some(
-                    l => /Spiżarnia → SPIZARNIA/.test(l) || /SPIZARNIA/.test(String(p.catalogRows[0].values)),
-                ),
-                p.summary.join('\n'),
-            );
+            assertCompleteMap(p, all);
+            assert.equal(rowFor(p, 'room', 'Spiżarnia')?.toValue, 'SPIZARNIA');
             assert.equal(p.coverage.uncovered.length, 0, p.coverage.uncovered.join('\n'));
         });
     });

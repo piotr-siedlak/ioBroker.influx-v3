@@ -263,7 +263,11 @@ wartości tych kluczy.
 katalogu. Obejmuje **każdy używany tag**: własne tagi z ustawień influxdb, tagi zapisane w starej bazie (opcja;
 połączenie z zakładki *Migracja danych*) oraz tagi stanów tej instancji. Niekompletne wiersze (np. pozostawione przez
 *Przejmij stare tagi*) są uzupełniane, klucze dopuszczające inne wartości dostają listę używanych wartości i również
-łączone warianty pisowni, a komunikat podaje, czy wszystkie używane wartości są objęte: klucze o tym samym znaczeniu są łączone (`room`, `Raum`, `pomieszczenie` → `location`; wbudowane
+łączone warianty pisowni. Tabela reguł dostaje **pełne mapowanie** pogrupowane według starego klucza: jeden wiersz na
+każdy stary klucz i jeden wiersz na każdą wartość standardową ze wszystkimi jej starymi wariantami – także dla
+wartości, które się nie zmieniają, więc każdy używany klucz i każda wartość są widoczne i edytowalne (klucze z
+ponad 100 różnymi wartościami dostają wiersze tylko dla zmienianych wartości). Komunikat podaje, czy wszystkie
+używane wartości są objęte; pełny wynik jest pokazany pod przyciskami (*Wynik ostatniej propozycji*): klucze o tym samym znaczeniu są łączone (`room`, `Raum`, `pomieszczenie` → `location`; wbudowane
 synonimy EN/DE/PL/FR/IT/ES), wartości różniące się tylko pisownią lub językiem są łączone (`Kotłownia`, `kotlownia`,
 `Heizungsraum` → `KOTLOWNIA`), pomieszczenia i funkcje ioBrokera służą jako wartości standardowe, a brakujące
 klucze/wartości są dodawane do katalogu tagów. Liczby są porównywane dokładnie (`-1` pozostaje różne od `1`).
