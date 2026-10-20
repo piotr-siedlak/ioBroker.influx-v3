@@ -9,27 +9,64 @@ awarie oraz odczytem historii i zapytaniami SQL. Jest to **niezależny** adapter
 
 🇬🇧 English: [README.md](../../README.md)
 
-> Status: **0.1.0, jeszcze nieopublikowany** w npm ani w repozytorium ioBrokera. Wersje testowe:
+> Status: **0.2.0, jeszcze nieopublikowany** w npm ani w repozytorium ioBrokera. Wersje testowe:
 > [docs/INSTALL-DEV.md](../INSTALL-DEV.md) (instalacja z GitHuba).
 
 ## Funkcje
 
-* Włączanie i ustawienia per stan w *Obiekty → zębatka → influx-v3.N* (bez restartu adaptera)
-* Dwa modele tabel: **grupowy** (wspólne tabele, tag `state_id`, zalecany) i **per-stan** (tabela na stan)
-* Tagi: **katalog tagów** (klucze, dozwolone wartości, wartości domyślne), automatyczne (room, function, adapter,
-  instance, device, channel, unit, role, name), per stan wybierane z katalogu,
-  bezpieczne szablony (`{id.segment[2]}`, `{common.unit}`, `{enum.room}` …), opcjonalne tagi dynamiczne z innych
-  stanów; ochrona przed sekretami w tagach i przed eksplozją kardynalności
+**Zapis**
+
+* Włączanie i ustawienia per stan w *Obiekty → zębatka → influx-v3.N* (bez restartu adaptera), także ze skryptów
+  (`enableHistory` / `disableHistory`)
+* Dwa modele tabel: **grupowy** (wspólne tabele per typ wartości, tag `state_id`, zalecany) i **per-stan** (tabela na
+  stan); własne tabele per stan albo przez reguły tabel (rola / wzorzec ID); *zapisz jako* auto/liczba/logiczna/tekst;
+  konflikty typów są wykrywane i wyświetlane zamiast zapisywania
 * Filtry per stan: tylko zmiany, debounce, czas blokady, minimalna zmiana, ponowny zapis, filtr ack/jakości,
   ignorowanie zera / wartości poniżej / powyżej, zaokrąglanie, wartość początkowa, „ostatnia pominięta wartość”
-* Natywne `/api/v3/write_lp` z precyzją milisekundową, paczki, gzip, ponawianie z wykładniczym opóźnieniem
-  i losowym rozrzutem, circuit breaker, obsługa częściowego zapisu, dzielenie paczek przy 413
-* Bufor w pamięci (zapisywany przy zatrzymaniu) lub na dysku (zapis przed wysłaniem, przetrwa `kill -9`)
+* Metadane `ack` / `q` / `from` jako pole, tag albo wcale; alias ID (zapis pod inną nazwą)
+
+**Tagi**
+
+* **Katalog tagów**: klucze, dozwolone wartości i wartości domyślne definiowane raz na instancję; okno obiektu
+  podpowiada tylko te klucze/wartości, a adapter pilnuje ich podczas pracy
+* Tagi automatyczne (room, function, adapter, instance, device, channel, unit, role, name), bezpieczne szablony
+  (`{id.segment[2]}`, `{common.unit}`, `{enum.room}` …), opcjonalne tagi dynamiczne z innych stanów, styl kluczy
+  `lower_snake_case` albo bez zmian
+* Ochrona przed sekretami w tagach i przed eksplozją kardynalności
+
+**Wysyłanie i niezawodność**
+
+* Natywne `/api/v3/write_lp` z precyzją milisekundową, paczki, gzip, opcjonalne `no_sync`, równoległe żądania,
+  ponawianie z wykładniczym opóźnieniem i losowym rozrzutem, `Retry-After`, circuit breaker, obsługa częściowego
+  zapisu, dzielenie paczek przy 413
+* Bufor w pamięci (zapisywany przy zatrzymaniu) lub na dysku (zapis przed wysłaniem, przetrwa `kill -9`), limity
+  i polityki przepełnienia; dostarczanie at-least-once z idempotentnym ponownym wysłaniem
+* Diagnostyka w `info.*` (połączenie, wersja serwera, zapisane/odrzucone/porzucone rekordy, bufor, konflikty,
+  ostatni błąd)
+
+**Odczyt**
+
 * `getHistory` dla wykresów ioBrokera (surowe, średnia, min, max, min/max, suma, liczba, percentyl, kwantyl —
-  liczone w InfluxDB przez `date_bin`), zapytania SQL i InfluxQL tylko do odczytu przez `sendTo`
-* Interfejs Admin (JSON Config) we wszystkich 11 językach ioBrokera (m.in. polski, angielski, niemiecki), test połączenia, podgląd mapowania,
-  diagnostyka, migracja ustawień z `influxdb` z **regułami tagów** oraz **import danych historycznych** z InfluxDB 1.x/2.x
-* Wiele instancji z różnymi serwerami/bazami
+  liczone w InfluxDB przez `date_bin`)
+* Zapytania SQL i InfluxQL tylko do odczytu przez `sendTo` z limitami wierszy/bajtów/czasu i opcjonalną listą
+  dozwolonych nadawców; polecenia schematu, statystyk i podglądu mapowania
+
+**Admin**
+
+* JSON Config we wszystkich 11 językach ioBrokera: test połączenia z niezapisanymi wartościami, opcjonalne *utwórz
+  bazę* z retencją, diagnostyka, podgląd tabeli, tagów i Line Protocol w oknie obiektu
+* Wiele instancji z różnymi serwerami/bazami, równolegle z klasycznym adapterem `influxdb`
+
+**Migracja z `ioBroker.influxdb`** (stary adapter i jego baza nigdy nie są zmieniane)
+
+* **Migracja ustawień**: kopiuje ustawienia stanów z instancji `influxdb.N`; własne tagi są tłumaczone na tagi
+  z katalogu **regułami tagów**, z podglądem na żywo; *Przejmij stare tagi* i **Zaproponuj standard** (synonimy,
+  warianty pisowni, pomieszczenia/funkcje, pełne mapowanie, raport pokrycia) wypełniają reguły automatycznie
+* **Import danych historycznych** z InfluxDB 1.x/2.x: także dla stanów jeszcze nieskonfigurowanych tutaj; jedno
+  przejście po osi czasu dla wszystkich stanów z dużymi równoległymi zapisami (zmierzone 66 500 punktów/s dla
+  548 stanów × 2 lata); podgląd (próba bez zapisu), liczba punktów, postęp z pozostałym czasem, stop/kontynuacja,
+  sam kontynuuje po restarcie albo awarii serwera; punkty są zapisywane jak wartości bieżące i kończą się tam, gdzie
+  zaczął się zapis bieżący
 
 ## Wymagania i obsługiwane edycje
 
@@ -39,7 +76,7 @@ awarie oraz odczytem historii i zapytaniami SQL. Jest to **niezależny** adapter
 | js-controller | ≥ 6.0.11 |
 | Admin | ≥ 7.6.20 |
 
-| Edycja | Obsługa w 0.1.0 |
+| Edycja | Obsługa w 0.2.0 |
 | --- | --- |
 | InfluxDB 3 **Core** | ✅ obsługiwana, testy integracyjne z wersją 3.12.1 |
 | InfluxDB 3 **Enterprise** | ✅ to samo API, powinna działać, **nieprzetestowana** (testy nie miały dostępu do serwera Enterprise) |
@@ -352,7 +389,7 @@ pliki (darmowa licencja do użytku domowego).
 | odrzucone rekordy `invalid column type` | kolumnę utworzono z innym typem (np. inne narzędzie) – użyj innej tabeli |
 | pusta historia po zmianie tabeli/trybu | stare dane zostają w starej tabeli – odczytaj je bezpośrednio przez SQL |
 | za reverse proxy | dodaj prefiks ścieżki do URL (`https://host/influx`) |
-| proxy HTTP | nieobsługiwane w 0.1.0 |
+| proxy HTTP | nieobsługiwane w 0.2.0 |
 | „Query would scan … Parquet files, exceeding the file limit” | InfluxDB 3 Core: zapytanie obejmuje więcej niż ok. 3 dni – zapytaj o krótszy okres, zwiększ `--query-file-limit` albo użyj Enterprise (zob. *Migracja danych* → Ograniczenia). Sam import już nie odpytuje InfluxDB 3 |
 | import zatrzymał się z „timeout after 10000 ms” (wersje sprzed importu w przekrojach czasowych) | zaktualizuj; import nie pyta już InfluxDB 3 o pierwszą wartość każdego stanu |
 | Tabela reguł z wieloma wierszami: *Stare wartości* ładują się wolno | używane tagi są odczytywane raz i współdzielone przez wszystkie komórki (stara baza: pamięć podręczna 10 min, komórka czeka na nią najwyżej 2 s); pierwsze otwarcie po starcie może pokazać tylko wartości z ustawień – otwórz zakładkę ponownie po chwili |
@@ -372,6 +409,40 @@ npx tsx scripts/loadtest.ts 100,1000,10000 20      # test obciążenia
 npx tsx scripts/import-loadtest.ts 548 3 300       # test importu historii (opis w nagłówku skryptu)
 scripts/influx3-test-server.sh stop && scripts/legacy-influx-test-server.sh stop
 ```
+
+## Lista zmian
+
+Pełna lista (po angielsku): [README.md → Changelog](../../README.md#changelog).
+
+### 0.2.0 (2026-10-20)
+
+* **Katalog tagów**: klucze, dozwolone wartości i wartości domyślne tagów w ustawieniach instancji; okno obiektu
+  podpowiada tylko je, adapter pilnuje ich podczas pracy (dawne tagi globalne stają się automatycznie wartościami
+  domyślnymi katalogu)
+* **Migracja ustawień z regułami tagów**: własne tagi `influxdb.N` są tłumaczone na tagi z katalogu (stary klucz i jedna
+  lub kilka starych wartości → klucz/wartość z katalogu albo usunięcie), z podglądem na żywo; stare klucze/wartości
+  podpowiadane z ustawień influxdb, ze starej bazy i z tej instancji; *Przejmij stare tagi*
+* **Zaproponuj standard**: automatyczne dopasowanie każdego używanego klucza i wartości (synonimy EN/DE/PL/FR/IT/ES,
+  warianty pisowni i języka, pomieszczenia/funkcje ioBrokera), pełne mapowanie, rozszerzenie katalogu, raport
+  pokrycia; *Zastosuj* może też ustandaryzować tagi stanów już skonfigurowanych
+* **Nowa zakładka „Migracja danych” – import historii z InfluxDB 1.x/2.x**: połączenie kopiowane z `influxdb.N`
+  (hasło/token zaszyfrowane, stara baza tylko czytana); importuje stany skonfigurowane tutaj i te zapisywane tylko
+  przez `influxdb.N`; punkty zapisywane jak wartości bieżące, stare tagi przechodzą przez reguły
+* **Import dla wielu lat danych**: jedno przejście po osi czasu dla wszystkich stanów, duże równoległe zapisy
+  (66 500 punktów/s, ok. 15× szybciej niż stan po stanie), bez zapytań do InfluxDB 3, liczba punktów, postęp z punktami/s
+  i pozostałym czasem, czeka na zrestartowane serwery i sam kontynuuje po restarcie adaptera
+* Admin: alias ID na zakładce podstawowej, szybkie listy w tabeli reguł także przy wielu wierszach, teksty pomocy
+  w 11 językach
+* Instalacja z GitHuba (`iobroker url …`) działa – skompilowany `build/` jest w repozytorium
+* Naprawione: wartość ustawiona tuż po włączeniu zapisu stanu mogła zginąć; tabele ustawień zapisane jako obiekty
+  (np. przez skrypty) są akceptowane
+* Podczas pracy tylko timery zarządzane przez adapter; zatrzymanie nigdy nie uruchamia nowych timerów
+
+### 0.1.0 (2026-10-19)
+
+* Pierwsza wersja: zapis wybranych stanów do InfluxDB 3 Core/Enterprise, tabele grupowe i per-stan, wielowarstwowe
+  tagi z szablonami i ochroną, bufor w pamięci/na dysku, getHistory z agregacją po stronie serwera, SQL/InfluxQL tylko
+  do odczytu, Admin w 11 językach, migracja ustawień z influxdb
 
 ## Licencja
 

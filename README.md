@@ -9,26 +9,61 @@ its instances or settings.
 
 🇵🇱 **Polska dokumentacja:** [docs/pl/README.md](docs/pl/README.md)
 
-> Status: **0.1.0, not yet published** to npm or the ioBroker repository. Test versions:
+> Status: **0.2.0, not yet published** to npm or the ioBroker repository. Test versions:
 > [docs/INSTALL-DEV.md](docs/INSTALL-DEV.md).
 
 ## Features
 
-* Per-state activation and settings in *Objects → gear icon → influx-v3.N* (no restart needed)
-* Two table models: **grouped** (shared tables, `state_id` tag, recommended) and **per-state** (one table per state)
-* Tags: global, automatic (room, function, adapter, instance, device, channel, unit, role, name), per-state,
-  safe templates (`{id.segment[2]}`, `{common.unit}`, `{enum.room}` …), optional dynamic tags from other states;
-  protection against secrets in tags and against cardinality explosions
+**Logging**
+
+* Per-state activation and settings in *Objects → gear icon → influx-v3.N* (no restart needed), also from scripts
+  (`enableHistory` / `disableHistory`)
+* Two table models: **grouped** (shared tables per value type, `state_id` tag, recommended) and **per-state** (one
+  table per state); own tables per state or by table rules (role / id pattern); *store as* auto/number/boolean/text;
+  type conflicts are detected and listed instead of being written
 * Filters per state: changes only, debounce, block time, minimal delta, re-log interval, ack/quality filter,
   ignore zero/below/above, rounding, initial value, "last skipped value" for flat chart lines
-* Native `/api/v3/write_lp` with millisecond precision, batching, gzip, retry with exponential backoff and jitter,
-  circuit breaker, partial-write handling, 413 splitting
-* Buffer in memory (saved on shutdown) or on disk (write-ahead, survives `kill -9`)
+* Metadata `ack` / `q` / `from` as field, tag or not at all; alias ID (store under another name)
+
+**Tags**
+
+* **Tag catalog**: tag keys, allowed values and defaults defined once per instance; the object dialog offers only
+  these keys/values, the adapter enforces them at runtime
+* Automatic tags (room, function, adapter, instance, device, channel, unit, role, name), safe templates
+  (`{id.segment[2]}`, `{common.unit}`, `{enum.room}` …), optional dynamic tags from other states, key style
+  `lower_snake_case` or as entered
+* Protection against secrets in tags and against cardinality explosions
+
+**Writing and reliability**
+
+* Native `/api/v3/write_lp` with millisecond precision, batching, gzip, optional `no_sync`, parallel requests, retry
+  with exponential backoff and jitter, `Retry-After`, circuit breaker, partial-write handling, 413 splitting
+* Buffer in memory (saved on shutdown) or on disk (write-ahead, survives `kill -9`), limits and overflow policies;
+  at-least-once delivery with idempotent replay
+* Diagnostics in `info.*` (connection, server version, written/rejected/dropped records, buffer, conflicts, last error)
+
+**Reading**
+
 * `getHistory` for ioBroker charts (raw, average, min, max, min/max, sum, count, percentile, quantile — computed in
-  InfluxDB with `date_bin`), read-only SQL and InfluxQL via `sendTo`
-* Admin UI (JSON Config) in all 11 ioBroker languages (incl. English, Polish, German), connection test, mapping preview, diagnostics,
-  migration of `influxdb` settings with **tag rules**, and **import of the historical data** from InfluxDB 1.x/2.x
-* Multiple instances with different servers/databases
+  InfluxDB with `date_bin`)
+* Read-only SQL and InfluxQL via `sendTo` with row/byte/time limits and an optional sender allow-list; schema,
+  statistics and mapping preview commands
+
+**Admin**
+
+* JSON Config in all 11 ioBroker languages: connection test with unsaved values, optional *create database* with
+  retention, diagnostics, preview of table, tags and line protocol in the object dialog
+* Multiple instances with different servers/databases, in parallel with the classic `influxdb` adapter
+
+**Migration from `ioBroker.influxdb`** (the old adapter and database are never changed)
+
+* **Migration of settings**: copies the per-state settings of an `influxdb.N` instance; custom tags are translated
+  into catalog tags with **tag rules**, with a live preview; *Take over old tags* and **Propose standard** (synonyms,
+  spelling variants, rooms/functions, complete mapping, coverage report) fill the rules automatically
+* **Import of historical data** from InfluxDB 1.x/2.x: also for states not configured here yet; one pass over the
+  time axis for all states with large parallel writes (measured 66 500 points/s for 548 states × 2 years);
+  preview (dry run), point count, progress with time left, stop/continue, continues by itself after a restart or a
+  server outage; points are written like live values and end where live logging started
 
 ## Requirements and supported editions
 
@@ -38,7 +73,7 @@ its instances or settings.
 | js-controller | ≥ 6.0.11 |
 | Admin | ≥ 7.6.20 |
 
-| Edition | Support in 0.1.0 |
+| Edition | Support in 0.2.0 |
 | --- | --- |
 | InfluxDB 3 **Core** | ✅ supported, integration-tested against 3.12.1 |
 | InfluxDB 3 **Enterprise** | ✅ same API, expected to work, **not tested** (no Enterprise server was available for the tests) |
@@ -332,7 +367,7 @@ InfluxDB 3 Enterprise, whose compaction merges old files (free licence for at-ho
 | records rejected `invalid column type` | the column was created with another type (e.g. by another tool) – use another table |
 | history empty after changing table/mode | old data stays in the old table – query it directly with SQL |
 | behind a reverse proxy | put the path prefix into the URL (`https://host/influx`) |
-| HTTP proxy | not supported in 0.1.0 |
+| HTTP proxy | not supported in 0.2.0 |
 | "Query would scan … Parquet files, exceeding the file limit" | InfluxDB 3 Core: the query covers more than about 3 days – query a shorter period, raise `--query-file-limit` or use Enterprise (see *Migration of data* → Limits). The import itself no longer queries InfluxDB 3 |
 | import stopped with "timeout after 10000 ms" (versions before the time-sliced import) | update; the import no longer asks InfluxDB 3 for the first value of each state |
 | Rule table with many rows: *Old values* load slowly | the used tags are read once and shared by all cells (old database: cached 10 min, a cell waits at most 2 s for it); the first page load after a start can show values from the settings only – reopen the tab a moment later |
@@ -362,40 +397,34 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
-### **WORK IN PROGRESS**
+### 0.2.0 (2026-10-20)
 
-* (Piotr Siedlak) Migration of data redesigned for histories of several years: one pass over the time axis for all
-  states (one query per time window, read-ahead), no queries against InfluxDB 3 (first live value recorded by the
-  adapter), large parallel write requests (about 15× faster), waits for restarted servers and continues after an
-  adapter restart by itself, point count with progress, points/s and time left. Fixes imports that stopped with
-  "timeout after 10000 ms" or "Query would scan 432 Parquet files"
-* (Piotr Siedlak) Migration of data: states that only the influxdb adapter logs are imported too (with the table and
-  tags the settings migration would give them, no setting changed); the preview groups the old measurements that are
-  not imported by reason
-* (Piotr Siedlak) Tag catalog: tag keys and their allowed values are defined centrally in the instance settings; the
-  object dialog only offers these keys/values (the former global tags become catalog defaults automatically)
-* (Piotr Siedlak) Alias ID moved to the basic tab of the object settings
-* (Piotr Siedlak) Installation from GitHub works (compiled `build/` is part of the repository)
-* (Piotr Siedlak) Only adapter-managed timers during operation; shutdown never starts new timers
+* (Piotr Siedlak) **Tag catalog:** tag keys, their allowed values and defaults are defined centrally in the instance
+  settings; the object dialog only offers these keys/values and the adapter enforces them at runtime (the former
+  global tags become catalog defaults automatically)
+* (Piotr Siedlak) **Migration of settings with tag rules:** custom tags of `influxdb.N` are translated into catalog
+  tags (old key and one or several old values → catalog key/value, or removed), with a live preview of the result and
+  of every old tag that still does not fit; old keys/values are offered from the influxdb settings, the old database
+  and this instance; *Take over old tags* fills the rules with suggested catalog values
+* (Piotr Siedlak) **Propose standard:** matches every used key and value automatically (synonyms in EN/DE/PL/FR/IT/ES,
+  spelling and language variants, ioBroker rooms/functions), writes a complete mapping grouped by old key, extends the
+  catalog, reports the coverage and shows the full result; *Apply* can also standardise the tags of states already
+  configured for this instance
+* (Piotr Siedlak) **New tab "Migration of data" – import of the history from InfluxDB 1.x/2.x:** connection copied
+  from `influxdb.N` (password/token stored encrypted, old database only read); imports the states configured here and
+  the states only `influxdb.N` logs (with the mapping the settings migration would give them); points are written
+  like live values, old tags pass the tag rules
+* (Piotr Siedlak) **Import built for several years of data:** one pass over the time axis for all states (one query
+  per time window, read-ahead), large parallel write requests (measured 66 500 points/s for 548 states × 2 years,
+  about 15× faster than state by state), no queries against InfluxDB 3 (each state ends at the first live value the
+  adapter recorded), point count, progress with points/s and time left, waits for restarted servers and continues
+  after an adapter restart by itself; the preview explains every old measurement that is not imported
+* (Piotr Siedlak) Admin: alias ID on the basic tab of the object settings; dropdowns of the rule table load fast also
+  with many rows (shared, cached inventory of used tags); help texts in all 11 languages
+* (Piotr Siedlak) Installation from GitHub (`iobroker url …`) works – the compiled `build/` is part of the repository
 * (Piotr Siedlak) Fixed: a value set right after logging was enabled for a state could be lost
-* (Piotr Siedlak) Settings tables are also accepted when they are stored as objects (e.g. written by scripts)
-* (Piotr Siedlak) Migration of settings: tag rules translate the custom tags of influxdb into catalog tags, with a
-  live preview of the result and of the tags that still do not fit
-* (Piotr Siedlak) Fixed: the "influxdb instance" dropdowns stayed empty (option objects); the import preview and
-  Start explain which old measurements belong to states not configured for this instance yet and what to do
-* (Piotr Siedlak) Fixed: with many rule rows the old values stayed empty - the used tags are now read once and
-  shared by all cells (one read of the old database instead of one per cell), dropdowns always answer with a list
-* (Piotr Siedlak) "Propose standard" writes a complete mapping (every key and value, grouped by old key) and shows
-  the full result in a panel; target values of rules from earlier runs are added to the catalog
-* (Piotr Siedlak) "Propose standard" covers every used tag (influxdb settings, old database, this instance), fills
-  incomplete rows, standardises open lists too and reports the coverage; Apply can standardise tags of states
-  already configured for this instance
-* (Piotr Siedlak) Migration of settings: "Propose standard" matches old keys and values automatically (synonyms,
-  spelling, ioBroker rooms/functions) and proposes catalog entries and rules
-* (Piotr Siedlak) Tag rules: old keys and values are offered from the influxdb settings, a rule can cover several old
-  values, "Take over old tags" fills the rules automatically with suggested catalog values
-* (Piotr Siedlak) New tab "Migration of data": import of the history from InfluxDB 1.x/2.x (preview, start/stop,
-  resume after restart, live progress); points are written like live values, old tags pass the tag rules
+* (Piotr Siedlak) Fixed: settings tables stored as objects (e.g. written by scripts) are accepted
+* (Piotr Siedlak) Only adapter-managed timers during operation; shutdown never starts new timers
 
 ### 0.1.0 (2026-10-19)
 

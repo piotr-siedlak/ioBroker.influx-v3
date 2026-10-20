@@ -17,7 +17,7 @@ Implement `InfluxV3Client` on `node:http`/`node:https`:
 * gzip request bodies above 1 KiB (configurable);
 * JSON results (`format: "json"`), `$param` binding;
 * exact parsing of the partial-write error body;
-* no HTTP proxy support in 0.1.0 (documented; Node's `http` has no built-in proxy and the use case is rare
+* no HTTP proxy support (0.1.0 and 0.2.0; documented; Node's `http` has no built-in proxy and the use case is rare
   for a LAN database).
 
 ## Consequences

@@ -1,6 +1,6 @@
 {
     "name": "iobroker.influx-v3",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Log ioBroker states into InfluxDB 3 (Core / Enterprise) with per-state tags and SQL history",
     "author": {
         "name": "Piotr Siedlak",

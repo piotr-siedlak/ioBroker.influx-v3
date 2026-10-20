@@ -1,8 +1,21 @@
 {
     "common": {
         "name": "influx-v3",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "news": {
+            "0.2.0": {
+                "en": "Tag catalog; settings migration with tag rules and an automatic standard proposal; new import of historical data from InfluxDB 1.x/2.x - fast, resumable, for several years of data; fixes",
+                "de": "Tag-Katalog; Migration der Einstellungen mit Tag-Regeln und automatischem Standardvorschlag; neuer Import historischer Daten aus InfluxDB 1.x/2.x - schnell, fortsetzbar, für mehrere Jahre Daten; Fehlerbehebungen",
+                "ru": "Каталог тегов; миграция настроек с правилами тегов и автоматическим предложением стандарта; новый импорт исторических данных из InfluxDB 1.x/2.x - быстрый, с продолжением, для данных за несколько лет; исправления",
+                "pt": "Catálogo de etiquetas; migração de definições com regras de etiquetas e proposta automática de padrão; nova importação de dados históricos do InfluxDB 1.x/2.x - rápida, retomável, para vários anos de dados; correções",
+                "nl": "Tagcatalogus; migratie van instellingen met tagregels en automatisch standaardvoorstel; nieuwe import van historische gegevens uit InfluxDB 1.x/2.x - snel, hervatbaar, voor meerdere jaren aan gegevens; reparaties",
+                "fr": "Catalogue de tags ; migration des paramètres avec règles de tags et proposition automatique d'un standard ; nouvel import des données historiques depuis InfluxDB 1.x/2.x - rapide, reprenable, pour plusieurs années de données ; corrections",
+                "it": "Catalogo dei tag; migrazione delle impostazioni con regole dei tag e proposta automatica di uno standard; nuova importazione dei dati storici da InfluxDB 1.x/2.x - veloce, riprendibile, per più anni di dati; correzioni",
+                "es": "Catálogo de etiquetas; migración de la configuración con reglas de etiquetas y propuesta automática de un estándar; nueva importación de datos históricos desde InfluxDB 1.x/2.x - rápida, reanudable, para varios años de datos; correcciones",
+                "pl": "Katalog tagów; migracja ustawień z regułami tagów i automatyczną propozycją standardu; nowy import danych historycznych z InfluxDB 1.x/2.x - szybki, wznawialny, dla wielu lat danych; poprawki",
+                "uk": "Каталог тегів; міграція налаштувань з правилами тегів і автоматичною пропозицією стандарту; новий імпорт історичних даних з InfluxDB 1.x/2.x - швидкий, з продовженням, для даних за кілька років; виправлення",
+                "zh-cn": "标签目录；带标签规则和自动标准建议的设置迁移；新的 InfluxDB 1.x/2.x 历史数据导入 - 快速、可续传、支持多年数据；问题修复"
+            },
             "0.1.0": {
                 "en": "Initial release: per-state logging to InfluxDB 3 Core/Enterprise, grouped and per-state tables, layered tags, disk buffer, SQL history",
                 "de": "Erste Version: Protokollierung einzelner Datenpunkte in InfluxDB 3 Core/Enterprise, gruppierte und Einzel-Tabellen, mehrstufige Tags, Festplattenpuffer, SQL-Historie",

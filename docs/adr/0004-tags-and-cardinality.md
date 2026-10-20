@@ -4,7 +4,7 @@ Status: accepted (2026-10-19)
 
 ## Decision
 
-* **Tag catalog (added after 0.1.0, owner request):** tag keys are defined once per instance (`tagDefinitions`:
+* **Tag catalog (added in 0.2.0, owner request):** tag keys are defined once per instance (`tagDefinitions`:
   key, allowed values, *other values allowed*, default for all states, description). The object dialog offers only
   catalog keys (`selectSendTo getTagKeys`) and suggests the allowed values (`autocompleteSendTo getTagValues`);
   validators read `instanceObj.native.tagDefinitions`, so the rules also apply when the instance is stopped. The

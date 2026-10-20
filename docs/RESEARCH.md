@@ -160,7 +160,7 @@ Decision (ADR-0003): use a **small own HTTP client** built on `node:http`/`node:
 | Tokens | admin token only (all-powerful) | resource tokens per database (read/write) | database tokens |
 | Retention change after creation | ❌ docs (✅ observed 3.12.1, not relied on) | ✅ | ✅ |
 | Limits | 5 DB / 2 000 tables / 500 columns | 100 DB default, configurable | service-specific |
-| **Adapter support in 0.1.0** | **supported, integration-tested** | **supported (same code path), untested** | **experimental write-only** via `/api/v2/write` (path verified against Core's compatibility endpoint, never against Cloud); history/SQL return a clear "not supported for this edition" error |
+| **Adapter support in 0.2.0** | **supported, integration-tested** | **supported (same code path), untested** | **experimental write-only** via `/api/v2/write` (path verified against Core's compatibility endpoint, never against Cloud); history/SQL return a clear "not supported for this edition" error |
 
 ## 8. Naming analysis
 
