@@ -66,11 +66,15 @@ class FakeTarget implements ImportTarget {
     written: string[] = [];
     results: WriteResult[] = [];
     first: Record<string, number> = {};
+    /** first value at or after the `after` argument */
+    firstAfter: Record<string, number> = {};
     firstCalls = 0;
+    afterArgs: (number | undefined)[] = [];
     busyCount = 0;
-    firstTime(item: ImportItem): Promise<number | undefined> {
+    firstTime(item: ImportItem, after?: number): Promise<number | undefined> {
         this.firstCalls++;
-        return Promise.resolve(this.first[item.id]);
+        this.afterArgs.push(after);
+        return Promise.resolve(after === undefined ? this.first[item.id] : this.firstAfter[item.id]);
     }
     write(lines: string[]): Promise<WriteResult> {
         const r = this.results.shift() ?? { kind: 'ok' };
@@ -101,11 +105,12 @@ function series(count: number, stepMs: number, start = T0): LegacyPoint[] {
     return Array.from({ length: count }, (_, i) => ({ ts: start + i * stepMs, value: i, tags: {} }));
 }
 
-function item(id: string, measurement = id): ImportItem {
+function item(id: string, measurement = id, pending = false): ImportItem {
     return {
         id,
         measurement,
         table: 'numeric_states',
+        pending,
         convert: (pts: LegacyPoint[]) => ({
             lines: pts
                 .filter(p => typeof p.value === 'number')
@@ -321,6 +326,47 @@ describe('data import (dataMigration)', () => {
         assert.equal(target.written.length, 12);
     });
 
+    it('a state only the old adapter logs is imported completely; its live values are found after that range', async () => {
+        const source = new FakeSource({ BUFOR: series(10, DAY) });
+        const target = new FakeTarget();
+        target.first['kebahp.0.top'] = T0; // would cut everything - must not be asked for a pending state
+        const store = new MemStore();
+        await makeJob(source, target, store, { untilFirstV3: true }).job.run(
+            [item('kebahp.0.top', 'BUFOR', true)],
+            'k',
+            new AbortController().signal,
+        );
+        assert.equal(target.written.length, 10, 'up to the newest old point');
+        assert.equal(target.firstCalls, 0);
+        assert.equal(store.cp!.liveStart['kebahp.0.top'], undefined, 'no live values yet');
+        assert.equal(store.cp!.importedUntil!['kebahp.0.top'], T0 + 9 * DAY + 1);
+        // later the settings migration is applied, live logging starts, the old adapter keeps logging: a new import
+        // looks for the first live value after the imported range and fills the time in between
+        source.data.BUFOR = series(14, DAY);
+        target.firstAfter['kebahp.0.top'] = T0 + 12 * DAY;
+        await makeJob(source, target, store, { untilFirstV3: true }).job.run(
+            [item('kebahp.0.top', 'BUFOR')],
+            'k2',
+            new AbortController().signal,
+        );
+        assert.deepEqual(target.afterArgs, [T0 + 9 * DAY + 1]);
+        assert.equal(store.cp!.liveStart['kebahp.0.top'], T0 + 12 * DAY);
+        assert.equal(target.written.length, 10 + 12);
+        assert.deepEqual(newCheckpoint('x', 1, store.cp).importedUntil, { 'kebahp.0.top': T0 + 9 * DAY + 1 });
+    });
+
+    it('reads checkpoints written before importedUntil existed', async () => {
+        const store = new MemStore();
+        store.cp = newCheckpoint('k', 1);
+        delete store.cp.importedUntil;
+        await makeJob(new FakeSource({ a: series(2, DAY) }), new FakeTarget(), store, { untilFirstV3: true }).job.run(
+            [item('a', 'a', true)],
+            'k',
+            new AbortController().signal,
+        );
+        assert.equal(store.cp.importedUntil!.a, T0 + DAY + 1);
+    });
+
     it('respects start and end dates', async () => {
         const source = new FakeSource({ a: series(10, DAY) });
         const target = new FakeTarget();
@@ -433,47 +479,59 @@ describe('data import (dataMigration)', () => {
         assert.match(text, /t,state_id=a value=0 1672531200000/);
         assert.match(text, /1 state\(s\) have no data/);
         assert.match(text, /1 measurement\(s\) of the old database are not selected/);
-        assert.match(text, /1 belong to no state of the influxdb settings .*: other/);
+        assert.match(text, /1 - belong to no state of the influxdb settings .*: other/);
         assert.equal(target.written.length, 0);
     });
 
     describe('unselected old measurements are explained', () => {
         const owners = new Map<string, MeasurementOwner>([
-            ['BAWIALNIA-TEMP', { id: '0_userdata.0.bawialnia.temp', instance: 'influxdb.0', configuredHere: false }],
-            ['BUFOR-TOP', { id: 'modbus.0.bufor.top', instance: 'influxdb.0', configuredHere: false }],
-            ['javascript.0.pv', { id: 'javascript.0.pv', instance: 'influxdb.1', configuredHere: false }],
-            ['FILTERED', { id: 'hm-rpc.0.x', instance: 'influxdb.0', configuredHere: true }],
+            [
+                'BAWIALNIA-TEMP',
+                { id: '0_userdata.0.bawialnia.temp', instance: 'influxdb.0', reason: 'excluded by the state filter' },
+            ],
+            ['BUFOR-TOP', { id: 'kebahp.0.Temperatures.Buffer_Top', instance: 'influxdb.0' }],
+            [
+                'javascript.0.pv',
+                {
+                    id: 'javascript.0.pv',
+                    instance: 'influxdb.1',
+                    reason: 'logged by influxdb.1, not by the selected influxdb.0',
+                },
+            ],
+            [
+                'TEXT',
+                {
+                    id: 'hm-rpc.0.x',
+                    instance: 'influxdb.0',
+                    reason: 'excluded by the state filter',
+                },
+            ],
         ]);
 
-        it('groups them by owner and tells what to do', () => {
+        it('groups them by reason, the largest group first', () => {
             const text = explainUnselected(
-                ['BAWIALNIA-TEMP', 'BUFOR-TOP', 'javascript.0.pv', 'FILTERED', 'OLD-GONE'],
+                ['BAWIALNIA-TEMP', 'BUFOR-TOP', 'javascript.0.pv', 'TEXT', 'HOL-ANIA-ZAWORY'],
                 owners,
-                'influx-v3.0',
             ).join('\n');
             assert.match(text, /5 measurement\(s\) of the old database are not selected/);
             assert.match(
                 text,
-                /2 belong to states logged by influxdb\.0 that are not configured for influx-v3\.0 yet, e\.g\.: BAWIALNIA-TEMP \(0_userdata\.0\.bawialnia\.temp\), BUFOR-TOP \(modbus\.0\.bufor\.top\)/,
+                /not selected \(not imported\):\n {2}2 - excluded by the state filter, e\.g\.: BAWIALNIA-TEMP \(0_userdata\.0\.bawialnia\.temp\), TEXT \(hm-rpc\.0\.x\)/,
             );
-            assert.match(text, /choose influxdb\.0, check the preview and press "Apply"/);
             assert.match(
                 text,
-                /1 belong to states logged by influxdb\.1 .*javascript\.0\.pv$/m,
+                /1 - logged by influxdb\.1, not by the selected influxdb\.0, e\.g\.: javascript\.0\.pv$/m,
                 'alias = id is shown once',
             );
+            assert.match(text, /1 - not selected, e\.g\.: BUFOR-TOP \(kebahp\.0\.Temperatures\.Buffer_Top\)/);
             assert.match(
                 text,
-                /1 belong to states of this instance excluded by the state filter, e\.g\.: FILTERED \(hm-rpc\.0\.x\)/,
+                /1 - belong to no state of the influxdb settings \(state deleted, logging disabled or alias changed\), e\.g\.: HOL-ANIA-ZAWORY/,
             );
-            assert.match(
-                text,
-                /1 belong to no state of the influxdb settings \(state deleted, logging disabled or alias changed\), e\.g\.: OLD-GONE/,
-            );
-            assert.deepEqual(explainUnselected([], owners, 'influx-v3.0'), []);
+            assert.deepEqual(explainUnselected([], owners), []);
         });
 
-        it('the preview with no selected state says why and lists the owners', async () => {
+        it('the preview with no selected state says so and explains the old measurements', async () => {
             const source = new FakeSource({ 'BAWIALNIA-TEMP': series(2, DAY) });
             const text = await previewImport(
                 [],
@@ -485,8 +543,38 @@ describe('data import (dataMigration)', () => {
                 owners,
                 'influx-v3.0',
             );
-            assert.match(text, /^No state of influx-v3\.0 is selected for the import/);
-            assert.match(text, /1 belong to states logged by influxdb\.0 that are not configured for influx-v3\.0 yet/);
+            assert.match(text, /^No state is selected for the import: neither influx-v3\.0 nor the influxdb adapter/);
+            assert.match(text, /1 - excluded by the state filter/);
+        });
+
+        it('the preview marks states that only the influxdb adapter logs so far', async () => {
+            const source = new FakeSource({ 'BUFOR-TOP': series(3, DAY), a: series(3, DAY) });
+            const target = new FakeTarget();
+            target.first['kebahp.0.Temperatures.Buffer_Top'] = T0;
+            const text = await previewImport(
+                [item('a'), item('kebahp.0.Temperatures.Buffer_Top', 'BUFOR-TOP', true)],
+                { source, target },
+                { ...SETTINGS, untilFirstV3: true },
+                undefined,
+                'k',
+                undefined,
+                owners,
+                'influx-v3.0',
+            );
+            assert.match(
+                text,
+                /^2 state\(s\) are selected for the import: 1 configured for influx-v3\.0, 1 logged only by the influxdb adapter so far\./,
+            );
+            assert.match(
+                text,
+                /imported with the table and tags that "Apply" in tab "Migration of settings" would give them/,
+            );
+            assert.match(
+                text,
+                /• kebahp\.0\.Temperatures\.Buffer_Top {2}\(old measurement "BUFOR-TOP" → table "numeric_states"\) {2}- not configured for influx-v3\.0 yet\n.*\n {4}import: {3}2023-01-01 00:00:00 … 2023-01-03 00:00:00\n/,
+            );
+            assert.equal(target.firstCalls, 1, 'only the configured state is checked for live values');
+            assert.doesNotMatch(text, /not selected/);
         });
     });
 });

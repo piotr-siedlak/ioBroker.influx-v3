@@ -454,7 +454,7 @@ tests.integration(path.join(__dirname, '..'), {
             const M = `${BASE}.mig`;
             const ids = { temp: `${M}.temp`, aliased: `${M}.aliased`, sw: `${M}.switch` };
             const OLD_ALIAS = `${M}.old_alias`;
-            // logged by influxdb.0 only (settings migration not applied): the import preview must explain it
+            // logged by influxdb.0 only (settings migration not applied): imported with the mapping "Apply" would give it
             const notYet = `${M}.not_yet`;
             const NOT_YET_ALIAS = `${M}.NOT-YET`;
             // outside of `${M}.*`, so the import test below does not select them
@@ -733,17 +733,21 @@ tests.integration(path.join(__dirname, '..'), {
                 const preview = await sendTo(harness, 'dmPreview', {});
                 assert.match(preview.result, /Preview ready/);
                 const html = (await harness.states.getStateAsync('influx-v3.0.info.dataMigration.preview')).val;
-                assert.match(html, /3 state\(s\) of this instance are selected/);
+                assert.match(html, /4 state\(s\) are selected for the import: 3 configured for influx-v3\.0, 1 logged only by the influxdb adapter so far/);
                 assert.match(html, new RegExp(`old measurement &quot;${OLD_ALIAS.replace(/\./g, '\\.')}&quot;`));
-                assert.match(html, /belong to states logged by influxdb\.0 that are not configured for influx-v3\.0 yet/);
-                assert.ok(html.includes(`${NOT_YET_ALIAS} (${notYet})`), 'alias and state id of the unconfigured state');
+                assert.ok(
+                    html.includes(`${notYet}  (old measurement &quot;${NOT_YET_ALIAS}&quot; → table &quot;numeric_states&quot;)  - not configured for influx-v3.0 yet`),
+                    'the unconfigured state is imported under its alias',
+                );
                 const start = await sendTo(harness, 'dmStart', {});
-                assert.match(start.result, /Import of 3 state\(s\) started/);
-                const status = await waitFor(async () => {
-                    const st = (await harness.states.getStateAsync('influx-v3.0.info.dataMigration.status'))?.val || '';
-                    return /^(finished|failed)/.test(st) ? st : null;
-                }, 90000);
-                assert.match(status, /^finished: 98 point\(s\) imported for 3 state\(s\)/);
+                assert.match(start.result, /Import of 4 state\(s\) started/);
+                const finished = async () =>
+                    waitFor(async () => {
+                        const st = (await harness.states.getStateAsync('influx-v3.0.info.dataMigration.status'))?.val || '';
+                        return /^(finished|failed)/.test(st) ? st : null;
+                    }, 90000);
+                const status = await finished();
+                assert.match(status, /^finished: 99 point\(s\) imported for 4 state\(s\)/);
                 assert.equal((await harness.states.getStateAsync('influx-v3.0.info.dataMigration.progress')).val, 100);
 
                 const q = query => sql(query, IMPORT_DB);
@@ -754,10 +758,27 @@ tests.integration(path.join(__dirname, '..'), {
                 const sw = await q(`SELECT value, ack FROM boolean_states WHERE state_id = '${ids.sw}' ORDER BY time`);
                 assert.deepEqual(sw.map(r => [r.value, r.ack]), [[true, false], [false, true]]);
 
+                const ny = await q(`SELECT COUNT(*) AS n, MIN(value) AS v FROM numeric_states WHERE state_id = '${NOT_YET_ALIAS}'`);
+                assert.deepEqual([Number(ny[0].n), ny[0].v], [1, 1], 'stored under the alias, like after "Apply"');
+                const nyObj = await harness.objects.getObjectAsync(notYet);
+                assert.equal(nyObj.common.custom['influx-v3.0'], undefined, 'the import changes no settings');
+
                 const again = await sendTo(harness, 'dmStart', {});
                 assert.match(again.error, /already finished/);
+
+                // settings migration applied afterwards: live logging starts, a new import ends at the first live value
+                // found after the range imported before (SQL with a lower time bound)
+                await sendTo(harness, 'migrationApply', { source: 'influxdb.0', rules: RULES, ids: [notYet] });
+                await waitFor(async () => (await sendTo(harness, 'getEnabledDPs', {}))[notYet]);
+                await harness.states.setStateAsync(notYet, { val: 5, ack: true });
+                await waitFor(async () => Number((await q(`SELECT COUNT(*) AS n FROM numeric_states WHERE state_id = '${NOT_YET_ALIAS}'`))[0].n) === 2, 20000);
                 const reset = await sendTo(harness, 'dmReset', {});
                 assert.match(reset.result, /Progress reset/);
+                const restart = await sendTo(harness, 'dmStart', {});
+                assert.match(restart.result, /Import of 4 state\(s\) started/);
+                assert.match(await finished(), /^finished: 99 point\(s\) imported for 4 state\(s\)/);
+                const after = await q(`SELECT COUNT(*) AS n, MAX(value) AS v FROM numeric_states WHERE state_id = '${NOT_YET_ALIAS}'`);
+                assert.deepEqual([Number(after[0].n), after[0].v], [2, 5], 'old point written again (same time), live value kept');
                 assert.ok(!harness.getLogs().some(l => l.message.includes(V2.INFLUX2_TOKEN)), 'token never logged');
             });
         });

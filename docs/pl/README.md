@@ -301,11 +301,17 @@ w starych punktach podczas importu danych.
 2. Opcjonalnie: ogranicz stany (`hm-rpc.0.*, javascript.0.*`) i okres.
 3. *Testuj połączenie*, potem *Podgląd (próba bez zapisu)*: dla każdego stanu stary pomiar (alias z ustawień
    `influxdb.N`, w przeciwnym razie identyfikator), stary i importowany okres, tabela docelowa oraz pierwsze
-   przekonwertowane rekordy; wymienione są też stare pomiary, które nie należą do żadnego skonfigurowanego stanu.
-   Nic nie jest zapisywane.
+   przekonwertowane rekordy; stare pomiary, które nie zostaną zaimportowane, są wymienione z przyczyną (filtr stanów,
+   inna instancja influxdb, konflikt, brak stanu). Nic nie jest zapisywane.
 4. *Start / kontynuuj*. Postęp, zaimportowane i odrzucone punkty widać na żywo (`info.dataMigration.*`).
    *Stop* albo restart adaptera zachowuje postęp – *Start* kontynuuje od miejsca zatrzymania. *Resetuj postęp*
    powoduje, że następny import zacznie się od początku.
+
+Które stany: skonfigurowane dla tej instancji **oraz** te, które zapisuje tylko `influxdb.N`. Te drugie są importowane
+z tabelą i tagami, które nadałoby im *Zastosuj* w *Migracji ustawień* (te same reguły, zapisany katalog) – żadne
+ustawienie nie jest zmieniane. Najlepsza kolejność: najpierw zastosuj migrację ustawień, potem importuj – wtedy każdy
+stan kończy się dokładnie na swojej pierwszej wartości bieżącej. Jeśli zastosujesz ją po imporcie, okres pomiędzy
+uzupełnisz ponownym importem (*Resetuj postęp* → *Start*).
 
 Jak zapisywane są punkty: dokładnie tak jak dzisiejsze wartości bieżące stanu (tabela, tagi z katalogu, metadane,
 zaokrąglanie, typ wartości; wartości, których nie da się przekonwertować, są liczone i pomijane). Domyślnie każdy stan

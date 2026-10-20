@@ -2258,9 +2258,9 @@
                 },
                 "dmStates": {
                     "type": "text",
-                    "label": "States (empty = all of this instance)",
-                    "tooltip": "tip_States (empty = all of this instance)",
-                    "help": "tip_States (empty = all of this instance)",
+                    "label": "States (empty = all logged states)",
+                    "tooltip": "tip_States (empty = all logged states)",
+                    "help": "tip_States (empty = all logged states)",
                     "placeholder": "hm-rpc.0.*, javascript.0.*",
                     "newLine": true,
                     "sm": 12,

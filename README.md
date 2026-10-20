@@ -282,10 +282,16 @@ custom tags (`room: Kotłownia (5), Salon (3), Garaż (1)`). Catalog changes are
 2. Optional: limit the states (`hm-rpc.0.*, javascript.0.*`) and the period.
 3. *Test connection*, then *Preview (dry run)*: per state the old measurement (alias of the `influxdb.N` settings,
    else the id), the old and the imported period, the target table and the first converted records; old
-   measurements that belong to no configured state are listed too. Nothing is written.
+   measurements that are not imported are listed with the reason (state filter, other influxdb instance, conflict,
+   no state). Nothing is written.
 4. *Start / continue*. Progress, imported and rejected points are shown live (`info.dataMigration.*`).
    *Stop* or an adapter restart keeps the progress – *Start* continues where it stopped. *Reset progress* starts
    the next import from the beginning.
+
+Which states: those configured for this instance **and** those only `influxdb.N` logs. The latter are imported with
+the table and tags that *Apply* in *Migration of settings* would give them (same rules, saved catalog) – no setting
+is changed. Best order: apply the settings migration first, then import – each state then ends exactly at its first
+live value. Applied after the import, the time in between is filled by importing again (*Reset progress* → *Start*).
 
 How the points are written: exactly like live values of the state today (table, catalog tags, metadata, rounding,
 value type; values that cannot be converted are counted and skipped). By default each state is imported only up to
@@ -337,6 +343,9 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 -->
 ### **WORK IN PROGRESS**
 
+* (Piotr Siedlak) Migration of data: states that only the influxdb adapter logs are imported too (with the table and
+  tags the settings migration would give them, no setting changed); the preview groups the old measurements that are
+  not imported by reason
 * (Piotr Siedlak) Tag catalog: tag keys and their allowed values are defined centrally in the instance settings; the
   object dialog only offers these keys/values (the former global tags become catalog defaults automatically)
 * (Piotr Siedlak) Alias ID moved to the basic tab of the object settings

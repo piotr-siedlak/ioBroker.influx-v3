@@ -30,7 +30,7 @@ const MAX_RETRIES = 10;
 // ------------------------------------------------------------------ settings
 
 export interface DataMigrationSettings {
-    /** id patterns (comma separated, `*` wildcard); empty = all states of this instance */
+    /** id patterns (comma separated, `*` wildcard); empty = all states of this instance and of the influxdb adapter */
     stateFilter: string;
     /** start (ms) or undefined = from the first point */
     from?: number;
@@ -221,6 +221,11 @@ export interface Checkpoint {
      * new jobs and resets - afterwards the import's own points would be found as "first value".
      */
     liveStart: Record<string, number>;
+    /**
+     * Per state imported while only the old adapter logged it: end of the imported range. Live values of this
+     * instance can only come later, so the first value after this time is the first live value. Kept like liveStart.
+     */
+    importedUntil?: Record<string, number>;
     totals: { points: number; errors: number; skipped: number };
 }
 
@@ -251,7 +256,7 @@ export class FileCheckpointStore implements CheckpointStore {
 }
 
 /**
- * Empty checkpoint for a job (keeps the live-start times of an older checkpoint).
+ * Empty checkpoint for a job (keeps the live-start and imported-until times of an older checkpoint).
  *
  * @param key job key
  * @param now current time
@@ -266,6 +271,7 @@ export function newCheckpoint(key: string, now: number, previous?: Checkpoint): 
         finished: false,
         states: {},
         liveStart: { ...(previous?.liveStart ?? {}) },
+        importedUntil: { ...(previous?.importedUntil ?? {}) },
         totals: { points: 0, errors: 0, skipped: 0 },
     };
 }
@@ -279,13 +285,18 @@ export interface ImportItem {
     measurement: string;
     /** target table (for messages) */
     table: string;
+    /**
+     * not configured for this instance yet (only the old adapter logs it): converted with the mapping the settings
+     * migration would give it, imported up to the newest old point
+     */
+    pending?: boolean;
     /** converts old points into line protocol */
     convert(points: LegacyPoint[]): { lines: string[]; skipped: number };
 }
 
 export interface ImportTarget {
-    /** time of the first value stored for the state in InfluxDB 3, undefined if none */
-    firstTime(item: ImportItem): Promise<number | undefined>;
+    /** time of the first value stored for the state in InfluxDB 3 (at or after `after`), undefined if none */
+    firstTime(item: ImportItem, after?: number): Promise<number | undefined>;
     write(lines: string[]): Promise<WriteResult>;
     /** true while live logging needs the connection (queue filling up) */
     busy(): boolean;
@@ -471,17 +482,22 @@ export class DataMigrationJob {
             }
             let start = Math.max(range.first, this.settings.from ?? range.first);
             let end = Math.min(range.last + 1, this.settings.to ?? Number.MAX_SAFE_INTEGER);
-            if (this.settings.untilFirstV3) {
+            const importedUntil = (this.cp.importedUntil ??= {});
+            if (this.settings.untilFirstV3 && !item.pending) {
                 let live: number | undefined = this.cp.liveStart[item.id];
                 if (live === undefined) {
-                    // no value in InfluxDB 3 yet: live values can only come from now on
-                    live = (await this.deps.target.firstTime(item)) ?? this.deps.now();
+                    // no value in InfluxDB 3 yet: live values can only come from now on; points written by an import
+                    // made while only the old adapter logged the state are older than importedUntil
+                    live = (await this.deps.target.firstTime(item, importedUntil[item.id])) ?? this.deps.now();
                     this.cp.liveStart[item.id] = live;
                 }
                 end = Math.min(end, live);
             }
             start = Math.floor(start);
             end = Math.floor(end);
+            if (item.pending) {
+                importedUntil[item.id] = Math.max(importedUntil[item.id] ?? 0, end);
+            }
             st.start = start;
             st.end = end;
             await this.save(true);
@@ -622,40 +638,32 @@ export interface MeasurementOwner {
     id: string;
     /** influxdb instance, e.g. influxdb.0 */
     instance: string;
-    /** the state is configured for this instance (but not selected, e.g. by the state filter) */
-    configuredHere: boolean;
+    /** why the state is not imported (state filter, other influxdb instance, mapping conflict, …) */
+    reason?: string;
 }
 
 /**
- * Explains the old measurements that are not selected for the import: which belong to states that only the
- * influxdb adapter logs (settings migration not applied yet), which are excluded by the state filter and which
- * belong to no known state.
+ * Explains the old measurements that are not selected for the import, grouped by the reason (state filter, other
+ * influxdb instance, mapping conflict, …), and those that belong to no known state.
  *
  * @param others measurements of the old database that are not selected
  * @param owners measurement → owner (from the influxdb settings)
- * @param target this instance, e.g. influx-v3.0
  */
-export function explainUnselected(
-    others: readonly string[],
-    owners: ReadonlyMap<string, MeasurementOwner>,
-    target: string,
-): string[] {
+export function explainUnselected(others: readonly string[], owners: ReadonlyMap<string, MeasurementOwner>): string[] {
     if (!others.length) {
         return [];
     }
     const example = (list: string[], show: (m: string) => string): string =>
         `${list.slice(0, 8).map(show).join(', ')}${list.length > 8 ? ', …' : ''}`;
-    const notHere = new Map<string, string[]>(); // influxdb instance → measurements
-    const filtered: string[] = [];
+    const byReason = new Map<string, string[]>(); // reason → measurements
     const unknown: string[] = [];
     for (const m of others) {
         const o = owners.get(m);
         if (!o) {
             unknown.push(m);
-        } else if (o.configuredHere) {
-            filtered.push(m);
         } else {
-            notHere.set(o.instance, [...(notHere.get(o.instance) ?? []), m]);
+            const reason = o.reason || 'not selected';
+            byReason.set(reason, [...(byReason.get(reason) ?? []), m]);
         }
     }
     const show = (m: string): string => {
@@ -663,20 +671,12 @@ export function explainUnselected(
         return o && o.id !== m ? `${m} (${o.id})` : m;
     };
     const lines = ['', `${others.length} measurement(s) of the old database are not selected (not imported):`];
-    for (const [instance, list] of [...notHere.entries()].sort()) {
-        lines.push(
-            `  ${list.length} belong to states logged by ${instance} that are not configured for ${target} yet, e.g.: ${example(list, show)}`,
-            `      → tab "Migration of settings": choose ${instance}, check the preview and press "Apply" (copies the settings incl. the aliases), then import.`,
-        );
-    }
-    if (filtered.length) {
-        lines.push(
-            `  ${filtered.length} belong to states of this instance excluded by the state filter, e.g.: ${example(filtered, show)}`,
-        );
+    for (const [reason, list] of [...byReason.entries()].sort((a, b) => b[1].length - a[1].length)) {
+        lines.push(`  ${list.length} - ${reason}, e.g.: ${example(list, show)}`);
     }
     if (unknown.length) {
         lines.push(
-            `  ${unknown.length} belong to no state of the influxdb settings (state deleted, logging disabled or alias changed), e.g.: ${example(unknown, m => m)}`,
+            `  ${unknown.length} - belong to no state of the influxdb settings (state deleted, logging disabled or alias changed), e.g.: ${example(unknown, m => m)}`,
         );
     }
     return lines;
@@ -700,6 +700,8 @@ export interface PreviewOptions {
  * @param checkpoint saved progress (for the resume hint)
  * @param key job key
  * @param opts limits
+ * @param owners old measurement → state of the influxdb settings, with the reason it is not imported
+ * @param target this instance, e.g. influx-v3.0
  */
 export async function previewImport(
     items: ImportItem[],
@@ -713,11 +715,20 @@ export async function previewImport(
 ): Promise<string> {
     const lines: string[] = [];
     const day = (t: number): string => new Date(t).toISOString().replace('T', ' ').slice(0, 19);
-    lines.push(
-        items.length
-            ? `${items.length} state(s) of this instance are selected for the import.`
-            : `No state of ${target} is selected for the import - only states configured for this instance can be imported (their table, type and tags come from these settings).`,
-    );
+    const pending = items.filter(i => i.pending).length;
+    if (!items.length) {
+        lines.push(
+            `No state is selected for the import: neither ${target} nor the influxdb adapter logs a state that matches the selection.`,
+        );
+    } else if (!pending) {
+        lines.push(`${items.length} state(s) of ${target} are selected for the import.`);
+    } else {
+        lines.push(
+            `${items.length} state(s) are selected for the import: ${items.length - pending} configured for ${target}, ${pending} logged only by the influxdb adapter so far.`,
+            `The ${pending} state(s) not configured for ${target} yet are imported with the table and tags that "Apply" in tab "Migration of settings" would give them (same tag rules and catalog).`,
+            `Tip: apply the settings migration before the import - then each state is imported exactly up to its first live value. Applied later, the time between the import and "Apply" is missing until you import again ("Reset progress" → "Start").`,
+        );
+    }
     if (checkpoint && checkpoint.jobKey === key && !checkpoint.finished) {
         const started = Object.values(checkpoint.states).filter(s => s.finished).length;
         lines.push(
@@ -745,14 +756,19 @@ export async function previewImport(
         const start = Math.max(range.first, settings.from ?? range.first);
         let end = Math.min(range.last + 1, settings.to ?? Number.MAX_SAFE_INTEGER);
         let limit = '';
-        if (settings.untilFirstV3) {
-            const live = checkpoint?.liveStart[item.id] ?? (await deps.target.firstTime(item));
+        if (settings.untilFirstV3 && !item.pending) {
+            const live =
+                checkpoint?.liveStart[item.id] ??
+                (await deps.target.firstTime(item, checkpoint?.importedUntil?.[item.id]));
             if (live !== undefined && live < end) {
                 end = live;
                 limit = ' (stops at the first value already in InfluxDB 3)';
             }
         }
-        lines.push('', `• ${item.id}  (old measurement "${item.measurement}" → table "${item.table}")`);
+        lines.push(
+            '',
+            `• ${item.id}  (old measurement "${item.measurement}" → table "${item.table}")${item.pending ? `  - not configured for ${target} yet` : ''}`,
+        );
         lines.push(`    old data: ${day(range.first)} … ${day(range.last)}`);
         if (end <= start) {
             lines.push('    nothing to import in the selected period');
@@ -783,7 +799,6 @@ export async function previewImport(
             ...explainUnselected(
                 all.filter(m => !known.has(m)),
                 owners,
-                target,
             ),
         );
     } catch (e) {

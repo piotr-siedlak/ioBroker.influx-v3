@@ -678,6 +678,35 @@ class InfluxV3Adapter extends utils.Adapter {
         };
     }
     /**
+     * Registration that is not logged: mapping preview and import of states not configured for this instance.
+     *
+     * @param id state id
+     * @param map mapping
+     * @param droppedTags tags the schema check removed
+     */
+    unloggedRegistration(id, map, droppedTags) {
+        const staticTags = {};
+        for (const [k, v] of Object.entries(map.tags.tags)) {
+            if (!droppedTags.includes(k)) {
+                staticTags[k] = v;
+            }
+        }
+        staticTags.state_id = map.storeId;
+        return {
+            id,
+            storeId: map.storeId,
+            cfg: map.cfg,
+            key: map.key,
+            target: map.target,
+            tags: map.tags,
+            staticTags,
+            metaFields: map.metaFields,
+            metaTags: map.metaTags,
+            warnings: map.warnings,
+            pipeline: undefined,
+        };
+    }
+    /**
      * Registers (or re-configures) a state.
      *
      * @param id state id
@@ -1449,27 +1478,7 @@ class InfluxV3Adapter extends utils.Adapter {
         if (!check.ok) {
             lines.push(`⚠ CONFLICT: ${check.reason}`);
         }
-        const staticTags = {};
-        for (const [k, v] of Object.entries(map.tags.tags)) {
-            if (check.ok && check.droppedTags.includes(k)) {
-                continue;
-            }
-            staticTags[k] = v;
-        }
-        staticTags.state_id = map.storeId;
-        const fake = {
-            id: m.id,
-            storeId: map.storeId,
-            cfg: map.cfg,
-            key: map.key,
-            target: map.target,
-            tags: map.tags,
-            staticTags,
-            metaFields: map.metaFields,
-            metaTags: map.metaTags,
-            warnings: map.warnings,
-            pipeline: undefined,
-        };
+        const fake = this.unloggedRegistration(m.id, map, check.ok ? check.droppedTags : []);
         const sample = st ?? {
             val: map.target.valueType === 'number' ? 0 : map.target.valueType === 'boolean' ? false : '',
             ts: Date.now(),
@@ -1920,50 +1929,149 @@ class InfluxV3Adapter extends utils.Adapter {
         }
         return id;
     }
-    /** Old measurement → ioBroker state of the influxdb settings (alias, else the id), for the explanations */
-    async dmOwners() {
+    /**
+     * Old measurement → ioBroker state of the influxdb settings (alias, else the id), with the reason why a state is
+     * not imported - for the explanations of the preview.
+     *
+     * @param job import settings
+     * @param items selected states
+     * @param skipped states left out by {@link dmItems}, with the reason
+     */
+    async dmOwners(job, items, skipped) {
+        const filter = (0, dataMigration_1.compileStateFilter)(job.stateFilter);
+        const selected = new Set(items.map(i => i.id));
         const view = await this.getObjectViewAsync('system', 'custom', {});
         const owners = new Map();
         for (const r of (view?.rows ?? [])) {
             const custom = r.value ?? {};
-            const here = !!custom[this.namespace]?.enabled;
             for (const [instance, c] of Object.entries(custom)) {
                 const cfg = c;
-                if (/^influxdb\.\d+$/.test(instance) && cfg?.enabled) {
-                    const alias = typeof cfg.aliasId === 'string' ? cfg.aliasId.trim() : '';
-                    owners.set(alias || r.id, { id: r.id, instance, configuredHere: here });
+                if (!/^influxdb\.\d+$/.test(instance) || !cfg?.enabled) {
+                    continue;
                 }
+                let reason;
+                if (!selected.has(r.id)) {
+                    const here = !!custom[this.namespace]?.enabled;
+                    reason =
+                        job.influxdbInstance && instance !== job.influxdbInstance
+                            ? `logged by ${instance}, not by the selected ${job.influxdbInstance}`
+                            : !filter(r.id)
+                                ? 'excluded by the state filter'
+                                : (skipped.get(r.id) ??
+                                    (here
+                                        ? `configured for ${this.namespace} but not logged (see its log)`
+                                        : 'not selected'));
+                }
+                const alias = typeof cfg.aliasId === 'string' ? cfg.aliasId.trim() : '';
+                owners.set(alias || r.id, { id: r.id, instance, reason });
             }
         }
         return owners;
     }
+    /**
+     * States to import: those configured for this instance (with their live mapping) and those only the influxdb
+     * adapter logs (with the mapping "Apply" of the settings migration would give them).
+     *
+     * @param job import settings
+     * @param rules tag rules
+     */
     async dmItems(job, rules) {
         const filter = (0, dataMigration_1.compileStateFilter)(job.stateFilter);
         const view = await this.getObjectViewAsync('system', 'custom', {});
-        const customs = new Map((view?.rows ?? []).map(r => [
-            r.id,
-            r.value ?? {},
-        ]));
+        const rows = (view?.rows ?? []).map(r => ({
+            id: r.id,
+            custom: r.value ?? {},
+        }));
+        const customs = new Map(rows.map(r => [r.id, r.custom]));
         const items = [];
-        for (const reg of [...this.registry.values()].sort((a, b) => a.id.localeCompare(b.id))) {
-            if (reg.conflict || !filter(reg.id)) {
+        const skipped = new Map();
+        for (const reg of this.registry.values()) {
+            if (!filter(reg.id)) {
+                continue;
+            }
+            if (reg.conflict) {
+                skipped.set(reg.id, `mapping conflict in ${this.namespace}: ${reg.conflict}`);
                 continue;
             }
             items.push({
                 id: reg.id,
                 measurement: this.oldMeasurement(reg.id, customs.get(reg.id), job.influxdbInstance),
                 table: reg.target.table,
-                convert: points => this.convertLegacy(reg.id, points, job.keepOldTags, rules),
+                convert: points => this.convertLegacy(this.registry.get(reg.id), points, job.keepOldTags, rules),
             });
         }
-        return items;
+        for (const p of await this.dmPlanned(rows, job, rules, filter, skipped)) {
+            items.push({
+                id: p.reg.id,
+                measurement: this.oldMeasurement(p.reg.id, customs.get(p.reg.id), p.instance),
+                table: p.reg.target.table,
+                pending: true,
+                convert: points => this.convertLegacy(p.reg, points, job.keepOldTags, rules),
+            });
+        }
+        return { items: items.sort((a, b) => a.id.localeCompare(b.id)), skipped };
+    }
+    /**
+     * States the influxdb adapter logs that are not configured for this instance: the mapping that "Apply" of the
+     * settings migration would give them (same tag rules, saved catalog), so that their history can be imported
+     * before - or without - the settings migration. Nothing is registered and no object is changed.
+     *
+     * @param rows objects with custom settings
+     * @param job import settings
+     * @param rules tag rules
+     * @param filter state filter
+     * @param skipped collects states that cannot be imported, with the reason
+     */
+    async dmPlanned(rows, job, rules, filter, skipped) {
+        const instances = job.influxdbInstance
+            ? [job.influxdbInstance]
+            : [...new Set(rows.flatMap(r => Object.keys(r.custom).filter(k => /^influxdb\.\d+$/.test(k))))].sort();
+        const planned = new Map();
+        for (const instance of instances) {
+            const plan = (0, migration_1.planSettingsMigration)(rows, instance, this.namespace, {
+                rules,
+                catalog: this.cfg.tagDefinitions,
+                style: this.cfg.tagKeyStyle,
+                overwrite: false,
+            });
+            for (const item of plan.todo) {
+                if (!planned.has(item.id) && !this.registry.has(item.id) && filter(item.id)) {
+                    planned.set(item.id, { config: item.config, instance });
+                }
+            }
+        }
+        const mappings = [];
+        for (const [id, p] of [...planned.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+            const obj = await this.getForeignObjectAsync(id).catch(() => null);
+            if (obj?.type !== 'state') {
+                skipped.set(id, obj ? `${obj.type}, not a state` : 'object not found');
+                continue;
+            }
+            mappings.push({ id, map: await this.computeMapping(id, obj, p.config), instance: p.instance });
+        }
+        // all planned states claim their columns together (conflicts between them count too), then release them -
+        // synchronously, so live logging never sees these claims
+        const results = mappings.map(m => this.schema.claim(m.map.claim));
+        for (const m of mappings) {
+            this.schema.release(m.id);
+        }
+        const out = [];
+        mappings.forEach((m, i) => {
+            const r = results[i];
+            if (r.ok) {
+                out.push({ reg: this.unloggedRegistration(m.id, m.map, r.droppedTags), instance: m.instance });
+            }
+            else {
+                skipped.set(m.id, `mapping conflict: ${r.reason}`);
+            }
+        });
+        return out;
     }
     /**
      * Converts old points with the live mapping of the state (type, rounding, table, tags, metadata). Tags of the
      * old points pass through the tag rules and the catalog and are added where the configuration sets no value.
      */
-    convertLegacy(id, points, keepOldTags, rules) {
-        const reg = this.registry.get(id);
+    convertLegacy(reg, points, keepOldTags, rules) {
         if (!reg || reg.conflict) {
             return { lines: [], skipped: points.length };
         }
@@ -2028,13 +2136,16 @@ class InfluxV3Adapter extends utils.Adapter {
     }
     dmTarget() {
         return {
-            firstTime: async (item) => {
+            firstTime: async (item, after) => {
                 const reg = this.registry.get(item.id);
                 if (!reg || !this.client) {
                     return undefined;
                 }
+                const since = after !== undefined && Number.isFinite(after)
+                    ? ` AND time >= to_timestamp_millis(${Math.floor(after)})`
+                    : '';
                 try {
-                    const rows = await this.client.querySql(`SELECT CAST(MIN(time) AS BIGINT) / 1000000 AS first FROM ${(0, historyService_1.quoteIdent)(reg.target.table)} WHERE state_id = $sid`, { sid: reg.storeId });
+                    const rows = await this.client.querySql(`SELECT CAST(MIN(time) AS BIGINT) / 1000000 AS first FROM ${(0, historyService_1.quoteIdent)(reg.target.table)} WHERE state_id = $sid${since}`, { sid: reg.storeId });
                     const v = rows[0]?.first;
                     return v === null || v === undefined || !Number.isFinite(Number(v)) ? undefined : Number(v);
                 }
@@ -2097,7 +2208,7 @@ class InfluxV3Adapter extends utils.Adapter {
         if (errors.length) {
             return this.reply(msg, { error: errors.join('; ') });
         }
-        const items = await this.dmItems(job, rules);
+        const { items, skipped } = await this.dmItems(job, rules);
         const reader = (0, legacySource_1.createLegacyReader)(source);
         try {
             const check = await reader.check();
@@ -2105,7 +2216,7 @@ class InfluxV3Adapter extends utils.Adapter {
                 return this.reply(msg, { error: `Old database: ${check.error}` });
             }
             const cp = await new dataMigration_1.FileCheckpointStore(this.dmFile()).load();
-            let text = await (0, dataMigration_1.previewImport)(items, { source: reader, target: this.dmTarget() }, job, cp, this.dmKey(source, job, rules), { detailed: 15, samples: 2 }, await this.dmOwners(), this.namespace);
+            let text = await (0, dataMigration_1.previewImport)(items, { source: reader, target: this.dmTarget() }, job, cp, this.dmKey(source, job, rules), { detailed: 15, samples: 2 }, await this.dmOwners(job, items, skipped), this.namespace);
             const retention = await this.client?.getRetentionMs().catch(() => undefined);
             if (retention) {
                 text += `\nNote: the InfluxDB 3 database keeps data only ${Math.round(retention / 86_400_000)} day(s) - older imported points are removed by the server.`;
@@ -2130,19 +2241,10 @@ class InfluxV3Adapter extends utils.Adapter {
         if (errors.length) {
             return this.reply(msg, { error: errors.join('; ') });
         }
-        const items = await this.dmItems(job, rules);
+        const { items, skipped } = await this.dmItems(job, rules);
         if (!items.length) {
-            const pending = new Map();
-            for (const o of (await this.dmOwners()).values()) {
-                if (!o.configuredHere) {
-                    pending.set(o.instance, (pending.get(o.instance) ?? 0) + 1);
-                }
-            }
-            const hint = [...pending.entries()]
-                .map(([inst, n]) => `${n} state(s) of ${inst} are not configured for ${this.namespace} yet: tab "Migration of settings" → choose ${inst} → "Apply".`)
-                .join(' ');
             return this.reply(msg, {
-                error: `No state of this instance matches the selection, nothing to import. ${hint || 'Configure the states for this instance first (tab "Migration of settings").'}`,
+                error: `Nothing to import: neither ${this.namespace} nor the influxdb adapter logs a state that matches the selection${skipped.size ? ` (${skipped.size} state(s) cannot be imported - see "Preview")` : ''}.`,
             });
         }
         const key = this.dmKey(source, job, rules);
@@ -2185,7 +2287,8 @@ class InfluxV3Adapter extends utils.Adapter {
             void this.refreshSchema();
         });
         this.dmRun = { ctrl, done };
-        this.log.info(`Data import started by ${msg.from}: ${items.length} state(s) from InfluxDB ${source.version}${warnings.length ? ` (warnings: ${warnings.join('; ')})` : ''}`);
+        const pending = items.filter(i => i.pending).length;
+        this.log.info(`Data import started by ${msg.from}: ${items.length} state(s)${pending ? ` (${pending} not configured for ${this.namespace} yet - mapping of the settings migration)` : ''} from InfluxDB ${source.version}${warnings.length ? ` (warnings: ${warnings.join('; ')})` : ''}`);
         this.reply(msg, { result: `Import of ${items.length} state(s) started - see the progress below and the log.` });
     }
     handleDmStop(msg) {

@@ -50,8 +50,8 @@ Runs inside the adapter as a background job; it is **read-only on the source** a
   (`encryptedNative` + `protectedNative`) and never logged. A button copies URL, version, database/bucket,
   organisation and user from an `influxdb.N` instance; secrets cannot be copied (they are protected for that
   adapter) and must be entered once.
-* **Scope**: the states this instance logs (configured via the settings migration or by hand), optionally limited by
-  an ID pattern, a start and an end date. The source measurement of a state is the alias of its `influxdb.N`
+* **Scope**: the states this instance logs (configured via the settings migration or by hand) and – since extension 6
+  – the states only the `influxdb.N` adapter logs, optionally limited by an ID pattern, a start and an end date. The source measurement of a state is the alias of its `influxdb.N`
   settings, else its own alias, else its ID (the same rule the classic adapter used).
 * **Conversion** uses the live code path: value coercion to the target type, rounding, target table, static tags
   (catalog defaults, automatic tags, state tags, `state_id`), metadata as fields/tags according to the instance
@@ -243,3 +243,31 @@ Decision:
 Plan: (a) `SharedCache` (single flight, TTL, stale value, failure TTL) with unit tests; (b) inventory in `main.ts` on
 top of it, bounded wait for the dropdowns, robust list replies; (c) harness test with 150 concurrent requests;
 (d) re-check in the local Admin with the slow old database; (e) docs.
+
+## Extension 6 (2026-10-20): import without applying the settings migration first
+
+Reported with screenshots: a user configured the old connection on the *Migration of data* tab and pressed
+*Preview*: "no state is selected", 546 of 547 old measurements "belong to states logged by influxdb.0 that are not
+configured for influx-v3.0 yet" (e.g. `BUFOR-TOP` of `kebahp.0.Temperatures.Buffer_Top`, which has an enabled
+`influxdb.0` configuration with that alias). The saved instance settings showed why: the settings migration had
+never been applied (`migrationSource` empty, no `influx-v3.0` entry in any object). Requiring *Apply* before an
+import was a hidden ordering rule; the import tab could only explain it.
+
+Decision:
+
+1. **The import also takes the states only `influxdb.N` logs** (the chosen instance, or all `influxdb.N` when none is
+   chosen). Their mapping is the one *Apply* of the settings migration would give them: the same `mapInfluxdbConfig`
+   + tag rules + **saved** tag catalog, then the normal `computeMapping` (table, value type, tags, metadata, alias as
+   `state_id`). So imported points look exactly like the live values after a later *Apply* with the same rules.
+   Nothing is registered for live logging and no object is changed.
+2. **Schema**: the columns of all these states are claimed together in the schema registry (so conflicts between them
+   are found too) and released synchronously before anything else runs. States with a conflict, objects that are no
+   state, and states whose `influx-v3.N` configuration is enabled but not logged are skipped and named in the preview.
+3. **Time range**: a state that is not logged live is imported up to the newest old point – there is no live value to
+   stop at. The end of that range is saved as `importedUntil` (kept across *Reset progress*, like `liveStart`). When
+   the state is configured later and imported again, the first live value is searched only after `importedUntil`
+   (`… AND time >= to_timestamp_millis(…)`), so the import's own points are never mistaken for live values and the
+   time between the two runs is filled.
+4. **Preview and messages**: the preview counts configured and not yet configured states, marks the latter, recommends
+   applying the settings migration first (then each state ends exactly at its first live value) and groups the old
+   measurements that are still not imported by reason (state filter, other influxdb instance, conflict, no state).
