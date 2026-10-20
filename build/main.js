@@ -61,6 +61,7 @@ const redact_1 = require("./lib/redact");
 const schemaMapper_1 = require("./lib/schemaMapper");
 const spool_1 = require("./lib/spool");
 const tagResolver_1 = require("./lib/tagResolver");
+const tagStandard_1 = require("./lib/tagStandard");
 const writeQueue_1 = require("./lib/writeQueue");
 const DYNAMIC_ALLOWED = /^[\p{L}\p{N} _.:/-]{1,128}$/u;
 class InfluxV3Adapter extends utils.Adapter {
@@ -1059,6 +1060,8 @@ class InfluxV3Adapter extends utils.Adapter {
                     return this.reply(msg, await this.oldTagValueOptions(msg.message));
                 case 'migrationSuggestRules':
                     return await this.handleSuggestRules(msg);
+                case 'migrationProposeStandard':
+                    return await this.handleProposeStandard(msg);
                 case 'getTagKeysForRules':
                     return this.reply(msg, [
                         ...this.cfg.tagDefinitions.map(d => ({ value: d.key, label: d.key })),
@@ -1586,6 +1589,50 @@ class InfluxV3Adapter extends utils.Adapter {
         const inventory = (0, migration_1.collectOldTags)(rows.map(r => ({ id: r.id, custom: r.value ?? {} })), source);
         this.oldTagCache = { at: now, source, inventory };
         return inventory;
+    }
+    /** Names of all ioBroker rooms or functions (system language) */
+    async enumNames(prefix) {
+        try {
+            const objs = await this.getForeignObjectsAsync(`${prefix}*`, 'enum');
+            const names = Object.entries(objs).map(([id, obj]) => this.nameOf(obj?.common?.name, id.split('.').pop() ?? id));
+            return [...new Set(names.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+        }
+        catch (e) {
+            this.log.debug(`Cannot read ${prefix}*: ${(0, redact_1.redact)(e)}`);
+            return [];
+        }
+    }
+    /**
+     * "Propose standard": matches old keys/values automatically (folding, synonyms, ioBroker rooms/functions) and
+     * writes proposed catalog rows and rule rows into the form (sendTo `useNative`) - nothing is saved.
+     */
+    async handleProposeStandard(msg) {
+        const m = (msg.message ?? {});
+        const native = this.config;
+        const inventory = await this.oldTags(m.source);
+        if (!inventory.keys.size) {
+            return this.reply(msg, { result: 'noOldTags', args: [] });
+        }
+        const valueStyle = m.valueStyle === 'upper' || m.valueStyle === 'lower' || m.valueStyle === 'asUsed' ? m.valueStyle : 'auto';
+        const useEnums = m.useEnums !== false;
+        const p = (0, tagStandard_1.proposeStandard)(inventory, {
+            catalogRows: m.catalog !== undefined ? m.catalog : native.tagDefinitions,
+            ruleRows: m.rules !== undefined ? m.rules : native.migrationTagRules,
+            keyStyle: this.cfg.tagKeyStyle,
+            valueField: this.cfg.valueField,
+            valueStyle,
+            rooms: useEnums ? await this.enumNames('enum.rooms.') : [],
+            functions: useEnums ? await this.enumNames('enum.functions.') : [],
+        });
+        if (!p.newKeys.length && !p.newValues && !p.newRules) {
+            return this.reply(msg, { result: 'standardNothing', args: [] });
+        }
+        this.reply(msg, {
+            native: { tagDefinitions: p.catalogRows, migrationTagRules: p.ruleRows },
+            result: 'standardProposed',
+            args: [String(p.newKeys.length), String(p.newValues), String(p.newRules), p.summary.join('\n')],
+            summary: p.summary,
+        });
     }
     /** Tag catalog sent by the Admin page (being edited), else the saved one */
     catalogFrom(raw) {

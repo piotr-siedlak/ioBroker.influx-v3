@@ -8,6 +8,7 @@ import {
     describeInventory,
     findTagRule,
     foldText,
+    foldValue,
     parseTagRules,
     ruleToRow,
     ruleValues,
@@ -316,6 +317,19 @@ describe('old tags of the influxdb settings', () => {
             { fromKey: 'floor', toKey: '-' },
         ]);
         assert.deepEqual(suggestTagRules(inv, done, CATALOG, 'snake'), []);
+    });
+
+    it('numbers are compared exactly: -1 is never suggested as 1', () => {
+        assert.notEqual(foldValue('-1'), foldValue('1'));
+        assert.equal(foldValue('1,5'), foldValue('1.5'));
+        assert.equal(foldValue('Kotłownia'), foldValue('KOTLOWNIA'));
+        const floors: TagDefinition[] = [
+            { key: 'floor', values: ['1', '2'], allowOther: false, defaultValue: '', description: '' },
+        ];
+        const inv3 = buildOldTagInventory([[{ key: 'floor', value: '-1' }]]);
+        assert.deepEqual(suggestTagRules(inv3, [], floors, 'snake'), [
+            { fromKey: 'floor', fromValues: ['-1'], toKey: 'floor', toValue: '' },
+        ]);
     });
 
     it('several old values with the same suggestion share one row', () => {

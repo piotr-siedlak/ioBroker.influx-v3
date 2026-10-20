@@ -243,6 +243,15 @@ values (equal when case and diacritics are ignored, e.g. `Kotłownia`, `kotlowni
 suggestion get a row with an empty new value. Existing rows are never changed – press it again after choosing new
 keys to get the value rows of those keys.
 
+**Propose standard (catalog + rules)** goes one step further and matches automatically, also when the catalog is
+still empty: keys with the same meaning are merged (`room`, `Raum`, `pomieszczenie` → `location`; built-in
+synonyms in EN/DE/PL/FR/IT/ES), values that differ only in spelling or language are merged (`Kotłownia`,
+`kotlownia`, `Heizungsraum` → `KOTLOWNIA`), the ioBroker rooms and functions serve as standard values, and missing
+keys/values are added to the tag catalog. Numbers are compared exactly (`-1` stays different from `1`). The spelling
+of new values is *automatic* (follows the catalog; empty catalog: `UPPER_CASE`), `UPPER_CASE`, `lower_case` or *as
+used*. Only the form is filled – existing rows and your own rules are kept; check the Tags tab, the rules and the
+preview, then save. Similarity is only used for this proposal, never at runtime.
+
 | Old key | Old values | New key | New value | Effect |
 | --- | --- | --- | --- | --- |
 | `room` | *(none)* | `Location` | *(empty)* | `room=Salon` → `Location=SALON` (spelling adapted to the catalog) |
@@ -327,6 +336,8 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 * (Piotr Siedlak) Settings tables are also accepted when they are stored as objects (e.g. written by scripts)
 * (Piotr Siedlak) Migration of settings: tag rules translate the custom tags of influxdb into catalog tags, with a
   live preview of the result and of the tags that still do not fit
+* (Piotr Siedlak) Migration of settings: "Propose standard" matches old keys and values automatically (synonyms,
+  spelling, ioBroker rooms/functions) and proposes catalog entries and rules
 * (Piotr Siedlak) Tag rules: old keys and values are offered from the influxdb settings, a rule can cover several old
   values, "Take over old tags" fills the rules automatically with suggested catalog values
 * (Piotr Siedlak) New tab "Migration of data": import of the history from InfluxDB 1.x/2.x (preview, start/stop,

@@ -544,6 +544,33 @@ tests.integration(path.join(__dirname, '..'), {
                 assert.equal(Number(res.args[0]), rows.length - 1);
             });
 
+            it('"propose standard" matches keys/values automatically and extends catalog and rules', async function () {
+                this.timeout(20000);
+                const res = await sendTo(harness, 'migrationProposeStandard', {
+                    source: 'influxdb.0',
+                    rules: [],
+                    catalog: CATALOG,
+                    valueStyle: 'upper',
+                    useEnums: true,
+                });
+                assert.equal(res.result, 'standardProposed', JSON.stringify(res));
+                const cat = res.native.tagDefinitions;
+                const rules = res.native.migrationTagRules;
+                const location = cat.find(d => d.key === 'Location');
+                assert.match(location.values, /^KOTLOWNIA, SALON, .*GARAZ/, 'missing value appended to the closed list');
+                assert.ok(cat.some(d => d.key === 'floor' && /\b1\b/.test(d.values) && /\b2\b/.test(d.values)), 'new key for floor');
+                assert.ok(rules.some(r => r.fromKey === 'room' && r.fromValue.length === 0 && r.toKey === 'Location'), 'room → Location (synonym)');
+                assert.ok(rules.some(r => r.fromValue.includes('Kotłownia') && r.toValue === 'KOTLOWNIA'));
+                assert.ok(rules.some(r => r.fromValue.includes('Garaż') && r.toValue === 'GARAZ'));
+                assert.match(res.args[3], /room → Location/);
+                // with the proposal every old tag fits: the preview lists nothing that would be dropped
+                const preview = await sendTo(harness, 'migrationPreviewHtml', { source: 'influxdb.0', overwrite: true, rules, catalog: cat });
+                assert.ok(!/NOT written/.test(preview.text), preview.text);
+                // a second proposal on top of the first one has nothing left to do
+                const again = await sendTo(harness, 'migrationProposeStandard', { source: 'influxdb.0', rules, catalog: cat, valueStyle: 'upper' });
+                assert.equal(again.result, 'standardNothing');
+            });
+
             it('one rule with several old values is applied', async function () {
                 this.timeout(20000);
                 const rules = [...RULES, { fromKey: 'room', fromValue: ['Kotłownia', 'Garaż'], toKey: 'Location', toValue: 'KOTLOWNIA' }, { fromKey: 'floor', fromValue: [], toKey: '-', toValue: '' }];

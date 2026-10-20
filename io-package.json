@@ -190,6 +190,8 @@
         "migrationSource": "",
         "migrationOverwrite": false,
         "migrationTagRules": [],
+        "migrationValueStyle": "auto",
+        "migrationUseEnums": true,
         "dmInfluxdbInstance": "",
         "dmVersion": "2.x",
         "dmUrl": "",

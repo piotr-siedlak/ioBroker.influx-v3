@@ -1737,13 +1737,97 @@
                     "lg": 12,
                     "xl": 12
                 },
+                "_hStandard": {
+                    "type": "header",
+                    "text": "hdr_propose_standard",
+                    "size": 5,
+                    "newLine": true,
+                    "sm": 12,
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
+                },
+                "_standardInfo": {
+                    "type": "staticText",
+                    "text": "txt_propose_standard",
+                    "newLine": true,
+                    "sm": 12,
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
+                },
+                "migrationValueStyle": {
+                    "type": "select",
+                    "label": "Spelling of proposed values",
+                    "tooltip": "tip_Spelling of proposed values",
+                    "help": "tip_Spelling of proposed values",
+                    "options": [
+                        {
+                            "value": "auto",
+                            "label": "opt_Automatic"
+                        },
+                        {
+                            "value": "upper",
+                            "label": "opt_UPPER CASE (BOILER_ROOM)"
+                        },
+                        {
+                            "value": "lower",
+                            "label": "opt_lower case (boiler_room)"
+                        },
+                        {
+                            "value": "asUsed",
+                            "label": "opt_As used most often"
+                        }
+                    ],
+                    "default": "auto",
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 4,
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
+                },
+                "migrationUseEnums": {
+                    "type": "checkbox",
+                    "label": "Use ioBroker rooms and functions as standard values",
+                    "tooltip": "tip_Use ioBroker rooms and functions as standard values",
+                    "help": "tip_Use ioBroker rooms and functions as standard values",
+                    "default": true,
+                    "sm": 12,
+                    "md": 8,
+                    "xs": 12,
+                    "lg": 8,
+                    "xl": 8
+                },
+                "_proposeStandard": {
+                    "type": "sendTo",
+                    "command": "migrationProposeStandard",
+                    "useNative": true,
+                    "variant": "contained",
+                    "showProcess": true,
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 4,
+                    "hidden": "!_alive",
+                    "label": "Propose standard (catalog + rules)",
+                    "jsonData": "{\"source\": ${JSON.stringify(data.migrationSource || '')}, \"rules\": ${JSON.stringify(data.migrationTagRules || [])}, \"catalog\": ${JSON.stringify(data.tagDefinitions || [])}, \"valueStyle\": ${JSON.stringify(data.migrationValueStyle || 'auto')}, \"useEnums\": ${data.migrationUseEnums !== false}}",
+                    "result": {
+                        "standardProposed": "res_standard_proposed",
+                        "standardNothing": "res_standard_nothing",
+                        "noOldTags": "res_no_old_tags"
+                    },
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
+                },
                 "_suggestRules": {
                     "type": "sendTo",
                     "command": "migrationSuggestRules",
                     "useNative": true,
                     "variant": "outlined",
                     "showProcess": true,
-                    "newLine": true,
                     "sm": 12,
                     "md": 4,
                     "hidden": "!_alive",

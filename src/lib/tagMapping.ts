@@ -242,6 +242,17 @@ export function foldText(s: string): string {
         .replace(/[^\p{L}\p{N}]+/gu, '');
 }
 
+/**
+ * Comparison form of a tag value for suggestions: numbers exactly (sign and decimals matter: `-1` ≠ `1`,
+ * `1,5` = `1.5`), other text with {@link foldText}.
+ *
+ * @param value tag value
+ */
+export function foldValue(value: string): string {
+    const t = value.trim();
+    return /^[+-]?\d+([.,]\d+)?$/.test(t) ? `#${t.replace(',', '.').replace(/^\+/, '')}` : foldText(t);
+}
+
 /** Old custom tags of the influxdb settings: key (ignoring case) → spelling, values with state counts */
 export interface OldTagInventory {
     keys: Map<string, { key: string; states: number; values: Map<string, number> }>;
@@ -345,8 +356,8 @@ export function suggestTagRules(
             if (res.tags.length) {
                 continue; // fits already
             }
-            const fv = foldText(v);
-            const suggestion = fv ? def.values.find(a => foldText(a) === fv) : undefined;
+            const fv = foldValue(v);
+            const suggestion = fv ? def.values.find(a => foldValue(a) === fv) : undefined;
             if (suggestion) {
                 const g = groups.get(suggestion) ?? [];
                 g.push(v);

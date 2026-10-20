@@ -135,3 +135,37 @@ Decision:
 Plan: (a) rule format with value lists + compatibility, (b) inventory and suggestions as pure functions with unit
 tests, (c) commands and preview, (d) Admin columns/button + 11 languages, (e) harness test of lists, suggestions and
 apply with a multi-value rule, (f) docs.
+
+## Extension 2 (2026-10-20): automatic matching and a proposed standard
+
+Problem: "Take over old tags" only fills rules for keys/values the catalog already knows. With an empty or partial
+catalog the user still has to invent a standard (key names, value spelling) and match every old variant by hand
+(`room`/`Raum`/`pomieszczenie`, `Kotłownia`/`kotlownia`/`Heizungsraum`).
+
+Decision – button **"Propose standard (catalog + rules)"** (pure function `proposeStandard`, `src/lib/tagStandard.ts`):
+
+1. **Keys**: an old key is matched to a catalog key when equal after folding (case, diacritics, punctuation,
+   plural `s`) or when both belong to the same **synonym group** of a small built-in dictionary (EN/DE/PL/FR/IT/ES:
+   location ≈ room/Raum/Zimmer/pomieszczenie/pokój/pièce …, floor ≈ Etage/piętro …, device, type, function, circuit,
+   zone, building, source). Old keys of the same group share one key. Without a catalog key a new key is proposed:
+   the canonical name of the group (`location`, `floor` …) or the folded old key; reserved names get a suffix.
+   An existing rule for the key (user decision) always wins; `-` keeps the tag removed.
+2. **Values** (closed lists): old values are grouped by folding; each group is matched to a candidate standard value –
+   the catalog values of the key and, optionally, the names of the ioBroker **rooms/functions** for location/function
+   keys – by folding or by a multilingual **room synonym dictionary** (boiler room ≈ Heizungsraum ≈ kotłownia,
+   kitchen ≈ Küche ≈ kuchnia …). Unmatched groups become new standard values. Keys whose catalog entry allows other
+   values keep their values (only the key is translated).
+3. **Spelling of new values**: setting *auto* (follows the existing catalog values – all upper case → `UPPER`,
+   all lower → `lower`, otherwise as used; an empty catalog → `UPPER`), `UPPER` (`GARAZ`, `BOILER_ROOM`), `lower`
+   (`garaz`, `boiler_room`) or *as used* (most frequent old spelling). New keys with many distinct values (> 25)
+   allow other values.
+4. **Result written into the form** (nothing is saved): catalog rows extended (new keys; missing values appended to
+   existing closed lists; existing rows otherwise unchanged) and the minimal rule rows appended (one "every value"
+   row for a key rename, plus rows with several old values per new value only where the automatic spelling does not
+   already give the result). Values with a rule of their own are left alone. The live preview shows the outcome; the
+   user reviews the Tags tab and the rules and saves.
+5. Matching by synonyms is only a proposal shown to the user – the runtime never maps by similarity.
+
+Plan: (a) `tagStandard.ts` with dictionaries, folding, style and `proposeStandard` + unit tests; (b) command
+`migrationProposeStandard` (inventory, room/function names, catalog/rules from the form); (c) Admin: value-style
+select, "use ioBroker rooms/functions" checkbox, button, 11 languages; (d) harness test; (e) docs.

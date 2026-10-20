@@ -259,6 +259,16 @@ diakrytycznych, np. `Kotłownia`, `kotlownia` → `KOTLOWNIA`); wartości bez pr
 wartością. Istniejące wiersze nigdy nie są zmieniane – po wybraniu nowych kluczy naciśnij ponownie, aby dostać wiersze
 wartości tych kluczy.
 
+**Zaproponuj standard (katalog + reguły)** idzie krok dalej i dopasowuje automatycznie, także przy pustym
+katalogu: klucze o tym samym znaczeniu są łączone (`room`, `Raum`, `pomieszczenie` → `location`; wbudowane
+synonimy EN/DE/PL/FR/IT/ES), wartości różniące się tylko pisownią lub językiem są łączone (`Kotłownia`, `kotlownia`,
+`Heizungsraum` → `KOTLOWNIA`), pomieszczenia i funkcje ioBrokera służą jako wartości standardowe, a brakujące
+klucze/wartości są dodawane do katalogu tagów. Liczby są porównywane dokładnie (`-1` pozostaje różne od `1`).
+Pisownia nowych wartości: *automatycznie* (jak w katalogu; pusty katalog: `WIELKIE_LITERY`), `WIELKIE_LITERY`,
+`małe_litery` albo *jak najczęściej używane*. Wypełniany jest tylko formularz – istniejące wiersze i Twoje reguły
+pozostają; sprawdź zakładkę Tagi, reguły i podgląd, a potem zapisz. Podobieństwo służy tylko do tej propozycji,
+nigdy w czasie działania.
+
 | Stary klucz | Stare wartości | Nowy klucz | Nowa wartość | Efekt |
 | --- | --- | --- | --- | --- |
 | `room` | *(brak)* | `Location` | *(puste)* | `room=Salon` → `Location=SALON` (pisownia dopasowana do katalogu) |

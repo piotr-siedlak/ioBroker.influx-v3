@@ -9,6 +9,7 @@ exports.applyTagRules = applyTagRules;
 exports.describeOutcome = describeOutcome;
 exports.ruleToRow = ruleToRow;
 exports.foldText = foldText;
+exports.foldValue = foldValue;
 exports.buildOldTagInventory = buildOldTagInventory;
 exports.describeInventory = describeInventory;
 exports.suggestTagRules = suggestTagRules;
@@ -212,6 +213,16 @@ function foldText(s) {
         .replace(/[^\p{L}\p{N}]+/gu, '');
 }
 /**
+ * Comparison form of a tag value for suggestions: numbers exactly (sign and decimals matter: `-1` ≠ `1`,
+ * `1,5` = `1.5`), other text with {@link foldText}.
+ *
+ * @param value tag value
+ */
+function foldValue(value) {
+    const t = value.trim();
+    return /^[+-]?\d+([.,]\d+)?$/.test(t) ? `#${t.replace(',', '.').replace(/^\+/, '')}` : foldText(t);
+}
+/**
  * Counts the old custom tags.
  *
  * @param tagsPerState custom tags of every state
@@ -302,8 +313,8 @@ function suggestTagRules(inv, rules, catalog, style) {
             if (res.tags.length) {
                 continue; // fits already
             }
-            const fv = foldText(v);
-            const suggestion = fv ? def.values.find(a => foldText(a) === fv) : undefined;
+            const fv = foldValue(v);
+            const suggestion = fv ? def.values.find(a => foldValue(a) === fv) : undefined;
             if (suggestion) {
                 const g = groups.get(suggestion) ?? [];
                 g.push(v);
