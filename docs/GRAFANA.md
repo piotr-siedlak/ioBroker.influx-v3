@@ -159,3 +159,8 @@ For large tables restrict variables to a time range (as above) – InfluxDB 3 sc
 * **Changes of tags or tables** create new series. Old data keeps the old tags/table – combine with `UNION ALL` or
   `COALESCE` if needed.
 * **Per-state mode:** tables are named like the state id → quote them: `SELECT * FROM "hm-rpc.0.ABC.TEMPERATURE"`.
+* **Long time ranges on InfluxDB 3 Core:** Core keeps one Parquet file per table and 10 minutes and never merges
+  them; a query may read at most `--query-file-limit` files (default 432 ≈ 3 days). Dashboards over weeks or years
+  (e.g. imported history) fail with `Query would scan … Parquet files, exceeding the file limit` – start Core with a
+  higher `--query-file-limit` (more memory per query) or use InfluxDB 3 Enterprise, whose compaction merges old
+  files.

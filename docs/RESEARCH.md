@@ -107,6 +107,8 @@ Analysed: `src/main.ts` (4 301 lines), `admin/jsonCustom.json`, `io-package.json
 | Columns per table (incl. `time` and tags) | **500** → 422 `would exceed the column limit … limit is 500` | measured |
 | Request size | 10 MiB | measured |
 | String field | 1 MB | measured |
+| Parquet files per query | **432** (`--query-file-limit`; ≈ 3 days at the default `--gen1-duration` of 10 min, one file per table and block) → `Query would scan 432 Parquet files, exceeding the file limit` | measured 2026-10-20 (user system and load test); Core never compacts, Enterprise does |
+| Write acknowledgement | after the WAL flush (`--wal-flush-interval`, default 1 s) → one connection writes ≈ one request per second: 5 000 lines ≈ 5 000 points/s, 50 000 lines ≈ 50 000/s, 2 × 50 000 ≈ 100 000/s | measured 2026-10-20 ([PERFORMANCE.md](PERFORMANCE.md)) |
 | Enterprise databases | default 100 | docs |
 | Enterprise tables/columns | configurable, different defaults | docs (not measured — no Enterprise license available) |
 

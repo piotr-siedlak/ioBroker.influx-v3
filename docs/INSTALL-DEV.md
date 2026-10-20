@@ -27,6 +27,8 @@ Run the same command again to update. Existing instances (`influx-v3.N`) and the
 * If ioBroker reports `cannot find start file`, the installed version is older than commit `0d21c36` – install again.
 * After the first start, define your tag keys in the instance settings (tab *Tags* → tag catalog) before choosing tags
   in the object settings.
+* A running history import (tab *Migration of data*) is paused by the update and continues by itself about 30 s after
+  the restart, as long as its settings are unchanged.
 
 ---
 
@@ -44,5 +46,6 @@ iobroker restart influx-v3.0
 ```
 
 To samo polecenie służy do aktualizacji. Istniejące instancje i ich ustawienia zostają zachowane, adapter `influxdb`
-nie jest zmieniany. Po pierwszym starcie zdefiniuj klucze tagów w ustawieniach instancji (zakładka *Tagi* → katalog
+nie jest zmieniany. Trwający import historii (zakładka *Migracja danych*) jest przy aktualizacji wstrzymywany i ok.
+30 s po restarcie kontynuuje sam, o ile jego ustawienia się nie zmieniły. Po pierwszym starcie zdefiniuj klucze tagów w ustawieniach instancji (zakładka *Tagi* → katalog
 tagów).

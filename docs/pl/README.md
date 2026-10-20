@@ -11,8 +11,6 @@ awarie oraz odczytem historii i zapytaniami SQL. Jest to **niezależny** adapter
 
 > Status: **0.1.0, jeszcze nieopublikowany** w npm ani w repozytorium ioBrokera. Wersje testowe:
 > [docs/INSTALL-DEV.md](../INSTALL-DEV.md) (instalacja z GitHuba).
-> Repozytorium na GitHubie trzeba najpierw przemianować na `ioBroker.influx-v3`, dopiero wtedy poniższe adresy
-> zadziałają (zob. [docs/PUBLISHING.md](../PUBLISHING.md)).
 
 ## Funkcje
 
@@ -44,7 +42,7 @@ awarie oraz odczytem historii i zapytaniami SQL. Jest to **niezależny** adapter
 | Edycja | Obsługa w 0.1.0 |
 | --- | --- |
 | InfluxDB 3 **Core** | ✅ obsługiwana, testy integracyjne z wersją 3.12.1 |
-| InfluxDB 3 **Enterprise** | ✅ to samo API, powinna działać, **nieprzetestowana** (brak licencji) |
+| InfluxDB 3 **Enterprise** | ✅ to samo API, powinna działać, **nieprzetestowana** (testy nie miały dostępu do serwera Enterprise) |
 | InfluxDB **Cloud** Serverless / Dedicated / Clustered | ⚠️ eksperymentalnie, **tylko zapis** przez `/api/v2/write`; historia i SQL niedostępne (te produkty udostępniają SQL wyłącznie przez Flight) |
 | InfluxDB 1.x / 2.x | ❌ użyj `ioBroker.influxdb` |
 
@@ -100,7 +98,7 @@ i pokazuje edycję, wersję, istnienie bazy i retencję — nigdy token.
 | Zaawansowane | próg subskrypcji wszystkich stanów, limity logów, interwał statystyk, statystyki do InfluxDB (opcjonalnie) |
 | Diagnostyka | połączenie, wersja serwera, zapisane/odrzucone/porzucone rekordy, bufor, ostatni błąd |
 | Migracja ustawień | kopiowanie ustawień stanów z instancji `influxdb.N` z tłumaczeniem własnych tagów przez **reguły tagów** (podgląd na żywo → zastosuj; `influxdb.N` pozostaje bez zmian) |
-| Migracja danych | import historii zapisywanych stanów ze starej bazy InfluxDB 1.x/2.x (test, podgląd, start/stop/wznowienie, postęp na żywo) |
+| Migracja danych | import historii stanów zapisywanych przez `influxdb.N` (także jeszcze nieskonfigurowanych tutaj) ze starej bazy InfluxDB 1.x/2.x, w jednym przejściu po osi czasu: test, podgląd, start/stop, liczba punktów, postęp na żywo z pozostałym czasem, po restarcie kontynuuje sam |
 
 ## Konfiguracja per stan (zębatka)
 
@@ -209,8 +207,11 @@ sendTo('influx-v3.0', 'getEnabledDPs', {}, cb);
 ```
 
 Pozostałe polecenia: `queryInfluxQL`, `storeState` (import wartości z pominięciem filtrów), `flushBuffer`,
-`getSchema`, `getAdapterStats`, `previewMapping`, `testConnection`, `createDatabase`, `migrationPreview`,
-`migrationApply`. Agregacje `getHistory`: `none`/`onchange`, `average`, `min`, `max`, `minmax`, `total`, `count`,
+`getSchema`, `getAdapterStats`, `diagnostics`, `previewMapping`, `testConnection`, `createDatabase`; migracja
+ustawień: `migrationPreview`, `migrationApply`, `migrationSuggestRules`, `migrationProposeStandard`; import danych
+(korzysta z zapisanych ustawień `dm*`): `dmTestSource`, `dmPreview` (wynik także w `info.dataMigration.preview`),
+`dmStart` (działa w tle, postęp w `info.dataMigration.*`), `dmStop` (kończy import do `dmStart`; restart adaptera go
+tylko wstrzymuje), `dmReset`. Agregacje `getHistory`: `none`/`onchange`, `average`, `min`, `max`, `minmax`, `total`, `count`,
 `percentile`, `quantile` (przybliżone). Stany tekstowe zwracane są bez agregacji; znacznik czasu agregatu to środek
 przedziału. Nieobsługiwane: `integral`, `update`, `delete*` (SQL InfluxDB 3 nie ma DML).
 
@@ -304,9 +305,10 @@ w starych punktach podczas importu danych.
    w przeciwnym razie identyfikator), tabela docelowa i przekonwertowane rekordy z ostatniej godziny; stare pomiary,
    które nie zostaną zaimportowane, są wymienione z przyczyną (filtr stanów, inna instancja influxdb, konflikt, brak
    stanu). Nic nie jest zapisywane.
-4. *Start / kontynuuj*. Postęp (osiągnięta data, punkty, punkty/s, szacowany pozostały czas), zaimportowane
-   i odrzucone punkty widać na żywo (`info.dataMigration.*`). *Stop* albo restart adaptera zachowuje postęp – *Start*
-   kontynuuje od miejsca zatrzymania. *Resetuj postęp* powoduje, że następny import zacznie się od początku.
+4. *Start / kontynuuj*. Postęp (osiągnięta data, punkty z ok. N, punkty/s, szacowany pozostały czas), zaimportowane
+   i odrzucone punkty widać na żywo (`info.dataMigration.*`). Po restarcie adaptera (aktualizacja, restart hosta)
+   import kontynuuje sam; po *Stop* czeka na *Start*, który kontynuuje od miejsca zatrzymania. *Resetuj postęp*
+   powoduje, że następny import zacznie się od początku. Plik postępu: `iobroker-data/influx-v3.N/data-migration.json`.
 
 Które stany: skonfigurowane dla tej instancji **oraz** te, które zapisuje tylko `influxdb.N`. Te drugie są importowane
 z tabelą i tagami, które nadałoby im *Zastosuj* w *Migracji ustawień* (te same reguły, zapisany katalog) – żadne

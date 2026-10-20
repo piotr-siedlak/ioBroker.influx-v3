@@ -9,8 +9,9 @@ under `src/lib/`; `src/main.ts` only wires them to the adapter lifecycle.
 ioBroker ───────────────────────────────────────────▶ AdapterRuntime ─────────────────────────────▶ InfluxDB 3
                                                        (src/main.ts)
    ┌───────────────────────────────────────────────────────┼──────────────────────────────────────────┐
-   │ ConfigurationService  StateRegistry  FilterPipeline  TagResolver  SchemaMapper  LineProtocol   │
+   │ ConfigurationService  state registry  FilterPipeline  TagResolver  SchemaMapper  LineProtocol  │
    │ WriteQueue ── Spool (disk)          InfluxV3Client   HistoryService  QueryService  Observability │
+   │ Migration  TagMapping  TagStandard  SharedCache  LegacySource ── DataMigration  LiveStartStore │
    └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -18,9 +19,8 @@ ioBroker ───────────────────────�
 
 | Module (file) | Responsibility | Pure? |
 | --- | --- | --- |
-| `AdapterRuntime` (`src/main.ts`) | lifecycle (`onReady`, `onStateChange`, `onObjectChange`, `onMessage`, `onUnload`), subscriptions, `info.*` states, wiring | no |
+| `AdapterRuntime` (`src/main.ts`) | lifecycle (`onReady`, `onStateChange`, `onObjectChange`, `onMessage`, `onUnload`), subscriptions, `info.*` states, wiring; holds the **state registry** (map *real id → registered state*: config, resolved mapping, pipeline; alias map; config hash so that unchanged objects are ignored) and decides between individual and wildcard subscription | no |
 | `ConfigurationService` (`lib/config.ts`) | normalises and validates instance config (`native`) and per-state config (`common.custom["influx-v3.N"]`), applies instance defaults, clamps ranges, returns typed objects + validation messages | yes |
-| `StateRegistry` (`lib/stateRegistry.ts`) | map *real id → registered state* (config, context, pipeline, resolved mapping); alias map; decides between individual and wildcard subscription; change detection (config hash) so unchanged objects are ignored | yes |
 | `FilterPipeline` (`lib/filterPipeline.ts`) | per state: ack/q filters, coercion, ignore filters, debounce, blockTime, changesOnly, minDelta, relog timer, "last skipped value" logging, initial value. Timers are injected (testable with fake clocks) | yes |
 | `TagResolver` (`lib/tagResolver.ts`) | layered tags, safe templates, key normalisation, collision detection, sanitisation, sensitive-data guard, cardinality guard, dynamic tags | yes |
 | `SchemaMapper` (`lib/schemaMapper.ts`) | table selection (`grouped` / `per-state`), value type decision, value coercion, type registry (one value type per table), table/column limit accounting | yes |
@@ -33,6 +33,7 @@ ioBroker ───────────────────────�
 | `Observability` (`lib/observability.ts`) | counters, last success/error times, periodic (10 s) publication to `info.*`, never written to InfluxDB unless explicitly enabled | yes |
 | `Migration` (`lib/migration.ts`) | explicit, previewable copy of `influxdb.N` per-state settings into `influx-v3.N`; custom tags translated by the tag rules | pure mapping + I/O on user request |
 | `TagMapping` (`lib/tagMapping.ts`) | tag rules (old key/value → catalog key/value, remove), catalog spelling, conflicts — shared by both migrations (ADR-0006) | yes |
+| `SharedCache` (`lib/sharedCache.ts`) | single-flight cache with TTL, stale value and failure TTL – one inventory of used tags for the many cells of the rule table (ADR-0006, extension 5) | yes |
 | `TagStandard` (`lib/tagStandard.ts`) | proposal of a standard for the old tags: key/value synonym dictionaries, folding, value spelling, catalog extension and minimal rules (only a proposal for the user, never used at runtime) | yes |
 | `LegacySource` (`lib/legacySource.ts`) | read-only readers for the old databases: InfluxDB 1.x (InfluxQL `GROUP BY *`, one statement per measurement), InfluxDB 2.x (Flux `pivot`, annotated CSV); one time window of many measurements per request, oldest point; quoting of identifiers/strings | pure parsers + I/O |
 | `DataMigration` (`lib/dataMigration.ts`) | import job: one pass over the time axis for all states (adaptive windows, read-ahead), batch writes with adaptive size, patient retries, live-queue priority, checkpoint/resume, progress with rate/ETA, dry-run preview; never queries InfluxDB 3; source/target/store/clock injected | yes (fakes) |
@@ -41,7 +42,7 @@ ioBroker ───────────────────────�
 
 ## Data flow of one state change
 
-1. `onStateChange(id, state)` → `StateRegistry.get(id)`; unknown ids are ignored in O(1)
+1. `onStateChange(id, state)` → lookup in the state registry; unknown ids are ignored in O(1)
    (important when subscribed to `*`).
 2. `FilterPipeline.process(state)` decides synchronously (or schedules a debounce/blockTime timer).
    Emitted states carry a reason (`change`, `relog`, `skipped`, `initial`, `debounced`, `blockReleased`).
@@ -52,10 +53,22 @@ ioBroker ───────────────────────�
 5. `LineProtocol.serialize()` → one line, timestamp = `state.ts` (ms), precision `millisecond`.
 6. `WriteQueue.push(line)` → flushed by size or interval → `InfluxV3Client.write()`.
 
+## Import of historical data
+
+See ADR-0006 (extensions 6 and 7). `DataMigrationJob` walks the time axis once: per window it reads all selected old
+measurements through `LegacySource` (query groups of ≤ 100, two at a time, the next window read ahead), converts the
+points per state with the live mapping (`main.ts`: the registered state, or the mapping *Apply* of the settings
+migration would give a state that only `influxdb.N` logs) and writes them directly through `InfluxV3Client` (50 000
+lines per request, 2 in parallel – not through the `WriteQueue`, which keeps priority). Each state ends at its first
+live value from `LiveStartStore`; InfluxDB 3 is never queried. Progress is saved per window in
+`iobroker-data/influx-v3.N/data-migration.json`; an import interrupted by a restart continues by itself.
+
 ## Configuration objects
 
-* Instance (`system.adapter.influx-v3.N` → `native`): connection, write, buffer, schema, tags,
-  defaults for states, history, advanced. Token: `encryptedNative` + `protectedNative`.
+* Instance (`system.adapter.influx-v3.N` → `native`): connection, write, buffer, schema, tags (tag catalog
+  `tagDefinitions`), defaults for states, history, advanced, settings migration (`migration*`), data import (`dm*`).
+  Token and the old database's password/token (`dmPassword`, `dmToken`): `encryptedNative` + `protectedNative`.
+  Example: [docs/examples/instance-native.json](examples/instance-native.json).
 * Per state (`common.custom["influx-v3.N"]`): `enabled` (provided by Admin), table/alias, store type,
   field (per-state mode only), tags, tag switches, filters, metadata switches. Admin dialog:
   `admin/jsonCustom.json`. Two instances never share configuration: every lookup uses `this.namespace`.
@@ -100,8 +113,11 @@ admin/            jsonConfig.json, jsonCustom.json, i18n/<lang>.json, influx-v3.
 src/main.ts       AdapterRuntime
 src/lib/*.ts      modules above
 test/unit/        mocha unit tests (no network)
-test/influx/      tests against a real InfluxDB 3 Core (Docker) — skipped when INFLUX3_URL is not set
+test/influx/      tests against real servers: InfluxDB 3 Core, and InfluxDB 1.8/2.7 as import sources (Docker) —
+                  skipped when the INFLUX3_* / INFLUX1_* / INFLUX2_* variables are not set
 test/integration.js, test/package.js   @iobroker/testing (real js-controller)
-scripts/          influx3-test-server.sh, legacy-influx-test-server.sh (InfluxDB 1.8/2.7), load test
-docs/             RESEARCH, ARCHITECTURE, adr/, GRAFANA, CONFIGURATION, pl/README
+scripts/          influx3-test-server.sh, legacy-influx-test-server.sh (InfluxDB 1.8/2.7), loadtest.ts,
+                  import-loadtest.ts
+build/            compiled JavaScript (committed: installation from GitHub needs it)
+docs/             RESEARCH, ARCHITECTURE, PERFORMANCE, GRAFANA, INSTALL-DEV, PUBLISHING, adr/, examples/, pl/README
 ```

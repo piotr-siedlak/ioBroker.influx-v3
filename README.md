@@ -41,7 +41,7 @@ its instances or settings.
 | Edition | Support in 0.1.0 |
 | --- | --- |
 | InfluxDB 3 **Core** | ✅ supported, integration-tested against 3.12.1 |
-| InfluxDB 3 **Enterprise** | ✅ same API, expected to work, **not tested** (no license available) |
+| InfluxDB 3 **Enterprise** | ✅ same API, expected to work, **not tested** (no Enterprise server was available for the tests) |
 | InfluxDB **Cloud** Serverless / Dedicated / Clustered | ⚠️ experimental, **write only** via `/api/v2/write`; history and SQL are not available (these products offer SQL only through Flight) |
 | InfluxDB 1.x / 2.x | ❌ use `ioBroker.influxdb` |
 
@@ -49,8 +49,9 @@ Details, measured limits and sources: [docs/RESEARCH.md](docs/RESEARCH.md).
 
 ## Installation (next to the classic adapter)
 
-1. ioBroker Admin → *Adapters* → search for **InfluxDB 3** → install. (Until the adapter is listed in the ioBroker
-   repository, test versions are installed as described in [docs/INSTALL-DEV.md](docs/INSTALL-DEV.md).)
+1. ioBroker Admin → *Adapters* → search for **InfluxDB 3** → install. Until the adapter is listed in the ioBroker
+   repository, install it from GitHub (details: [docs/INSTALL-DEV.md](docs/INSTALL-DEV.md)):
+   `iobroker url https://github.com/piotr-siedlak/ioBroker.influx-v3`, then `iobroker restart influx-v3.0`.
 2. Add an instance `influx-v3.0`. An existing `influxdb.0` keeps working unchanged.
 3. Configure the connection (below), define your tag keys in the **tag catalog** (tab *Tags*) and enable logging for
    states via the gear icon.
@@ -86,7 +87,7 @@ On **Enterprise**, create a resource token with read+write permission for the on
 | Advanced | subscription threshold, log rate limits, statistics interval, statistics into InfluxDB (opt-in) |
 | Diagnostics | connection, server version, written/rejected/dropped records, buffer, last error |
 | Migration of settings | copy per-state settings from an `influxdb.N` instance, translating its custom tags with **tag rules** (live preview → apply; nothing is changed in `influxdb.N`) |
-| Migration of data | import the history of the logged states from the old InfluxDB 1.x/2.x database (test, preview, start/stop/resume, live progress) |
+| Migration of data | import the history of the states logged by `influxdb.N` (also those not configured here yet) from the old InfluxDB 1.x/2.x database, in one pass over the time axis: test, preview, start/stop, point count, live progress with time left, continues by itself after a restart |
 
 ## Per-state configuration
 
@@ -204,10 +205,12 @@ sendTo('influx-v3.0', 'previewMapping', { id, config }, cb); // table, tags and 
 // migration (Admin buttons): settings with tag rules, import of historical data (uses the saved dm* settings)
 sendTo('influx-v3.0', 'migrationPreview', { source: 'influxdb.0', rules: [{ fromKey: 'room', toKey: 'Location' }] }, cb);
 sendTo('influx-v3.0', 'migrationApply', { source: 'influxdb.0', rules, overwrite: false, ids: [/* optional */] }, cb);
+// further helpers of the Admin form: migrationSuggestRules, migrationProposeStandard, getOldTagKeys, getOldTagValues,
+// listInfluxdbInstances, dmFillFromInfluxdb; diagnostics and testConnection for the Diagnostics/Connection tabs
 sendTo('influx-v3.0', 'dmTestSource', {}, cb);
 sendTo('influx-v3.0', 'dmPreview', {}, cb);              // also stored as HTML in info.dataMigration.preview
 sendTo('influx-v3.0', 'dmStart', {}, cb);                // runs in the background, progress in info.dataMigration.*
-sendTo('influx-v3.0', 'dmStop', {}, cb);
+sendTo('influx-v3.0', 'dmStop', {}, cb);                 // ends it until dmStart (a restart only pauses it)
 sendTo('influx-v3.0', 'dmReset', {}, cb);
 ```
 
@@ -284,9 +287,10 @@ custom tags (`room: Kotłownia (5), Salon (3), Garaż (1)`). Catalog changes are
    first live value, and for the first states the old measurement (alias of the `influxdb.N` settings, else the id),
    the target table and converted records from the newest hour; old measurements that are not imported are listed
    with the reason (state filter, other influxdb instance, conflict, no state). Nothing is written.
-4. *Start / continue*. Progress (date reached, points, points/s, estimated time left), imported and rejected points
-   are shown live (`info.dataMigration.*`). *Stop* or an adapter restart keeps the progress – *Start* continues where
-   it stopped. *Reset progress* starts the next import from the beginning.
+4. *Start / continue*. Progress (date reached, points of about N, points/s, estimated time left), imported and
+   rejected points are shown live (`info.dataMigration.*`). After an adapter restart (update, host reboot) the import
+   continues by itself; after *Stop* it waits for *Start*, which continues where it stopped. *Reset progress* starts
+   the next import from the beginning. The progress file is `iobroker-data/influx-v3.N/data-migration.json`.
 
 Which states: those configured for this instance **and** those only `influxdb.N` logs. The latter are imported with
 the table and tags that *Apply* in *Migration of settings* would give them (same rules, saved catalog) – no setting
@@ -362,7 +366,7 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 * (Piotr Siedlak) Migration of data redesigned for histories of several years: one pass over the time axis for all
   states (one query per time window, read-ahead), no queries against InfluxDB 3 (first live value recorded by the
-  adapter), large parallel write requests (about 20× faster), waits for restarted servers and continues after an
+  adapter), large parallel write requests (about 15× faster), waits for restarted servers and continues after an
   adapter restart by itself, point count with progress, points/s and time left. Fixes imports that stopped with
   "timeout after 10000 ms" or "Query would scan 432 Parquet files"
 * (Piotr Siedlak) Migration of data: states that only the influxdb adapter logs are imported too (with the table and
