@@ -617,6 +617,71 @@ export class DataMigrationJob {
 
 // ------------------------------------------------------------------ preview
 
+/** Owner of an old measurement: the ioBroker state whose influxdb settings wrote it (alias, else the id) */
+export interface MeasurementOwner {
+    id: string;
+    /** influxdb instance, e.g. influxdb.0 */
+    instance: string;
+    /** the state is configured for this instance (but not selected, e.g. by the state filter) */
+    configuredHere: boolean;
+}
+
+/**
+ * Explains the old measurements that are not selected for the import: which belong to states that only the
+ * influxdb adapter logs (settings migration not applied yet), which are excluded by the state filter and which
+ * belong to no known state.
+ *
+ * @param others measurements of the old database that are not selected
+ * @param owners measurement → owner (from the influxdb settings)
+ * @param target this instance, e.g. influx-v3.0
+ */
+export function explainUnselected(
+    others: readonly string[],
+    owners: ReadonlyMap<string, MeasurementOwner>,
+    target: string,
+): string[] {
+    if (!others.length) {
+        return [];
+    }
+    const example = (list: string[], show: (m: string) => string): string =>
+        `${list.slice(0, 8).map(show).join(', ')}${list.length > 8 ? ', …' : ''}`;
+    const notHere = new Map<string, string[]>(); // influxdb instance → measurements
+    const filtered: string[] = [];
+    const unknown: string[] = [];
+    for (const m of others) {
+        const o = owners.get(m);
+        if (!o) {
+            unknown.push(m);
+        } else if (o.configuredHere) {
+            filtered.push(m);
+        } else {
+            notHere.set(o.instance, [...(notHere.get(o.instance) ?? []), m]);
+        }
+    }
+    const show = (m: string): string => {
+        const o = owners.get(m);
+        return o && o.id !== m ? `${m} (${o.id})` : m;
+    };
+    const lines = ['', `${others.length} measurement(s) of the old database are not selected (not imported):`];
+    for (const [instance, list] of [...notHere.entries()].sort()) {
+        lines.push(
+            `  ${list.length} belong to states logged by ${instance} that are not configured for ${target} yet, e.g.: ${example(list, show)}`,
+            `      → tab "Migration of settings": choose ${instance}, check the preview and press "Apply" (copies the settings incl. the aliases), then import.`,
+        );
+    }
+    if (filtered.length) {
+        lines.push(
+            `  ${filtered.length} belong to states of this instance excluded by the state filter, e.g.: ${example(filtered, show)}`,
+        );
+    }
+    if (unknown.length) {
+        lines.push(
+            `  ${unknown.length} belong to no state of the influxdb settings (state deleted, logging disabled or alias changed), e.g.: ${example(unknown, m => m)}`,
+        );
+    }
+    return lines;
+}
+
 export interface PreviewOptions {
     /** states shown in detail */
     detailed: number;
@@ -643,10 +708,16 @@ export async function previewImport(
     checkpoint: Checkpoint | undefined,
     key: string,
     opts: PreviewOptions = { detailed: 15, samples: 2 },
+    owners: ReadonlyMap<string, MeasurementOwner> = new Map(),
+    target = 'this instance',
 ): Promise<string> {
     const lines: string[] = [];
     const day = (t: number): string => new Date(t).toISOString().replace('T', ' ').slice(0, 19);
-    lines.push(`${items.length} state(s) of this instance are selected for the import.`);
+    lines.push(
+        items.length
+            ? `${items.length} state(s) of this instance are selected for the import.`
+            : `No state of ${target} is selected for the import - only states configured for this instance can be imported (their table, type and tags come from these settings).`,
+    );
     if (checkpoint && checkpoint.jobKey === key && !checkpoint.finished) {
         const started = Object.values(checkpoint.states).filter(s => s.finished).length;
         lines.push(
@@ -708,16 +779,13 @@ export async function previewImport(
     try {
         const all = await deps.source.listMeasurements(20_000);
         const known = new Set(items.map(i => i.measurement));
-        const others = all.filter(m => !known.has(m));
-        if (others.length) {
-            lines.push(
-                '',
-                `${others.length} measurement(s) of the old database belong to no state selected here (not imported), e.g.: ${others
-                    .slice(0, 8)
-                    .join(', ')}`,
-                'Configure these states for this instance first (tab "Migration of settings") if you need their history.',
-            );
-        }
+        lines.push(
+            ...explainUnselected(
+                all.filter(m => !known.has(m)),
+                owners,
+                target,
+            ),
+        );
     } catch (e) {
         lines.push('', `List of old measurements not available: ${e instanceof Error ? e.message : redact(e)}`);
     }

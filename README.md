@@ -346,6 +346,8 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 * (Piotr Siedlak) Settings tables are also accepted when they are stored as objects (e.g. written by scripts)
 * (Piotr Siedlak) Migration of settings: tag rules translate the custom tags of influxdb into catalog tags, with a
   live preview of the result and of the tags that still do not fit
+* (Piotr Siedlak) Fixed: the "influxdb instance" dropdowns stayed empty (option objects); the import preview and
+  Start explain which old measurements belong to states not configured for this instance yet and what to do
 * (Piotr Siedlak) Fixed: with many rule rows the old values stayed empty - the used tags are now read once and
   shared by all cells (one read of the old database instead of one per cell), dropdowns always answer with a list
 * (Piotr Siedlak) "Propose standard" writes a complete mapping (every key and value, grouped by old key) and shows

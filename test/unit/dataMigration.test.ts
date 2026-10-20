@@ -11,6 +11,8 @@ import {
     compileStateFilter,
     DataMigrationJob,
     DAY,
+    explainUnselected,
+    type MeasurementOwner,
     FileCheckpointStore,
     type ImportItem,
     type ImportTarget,
@@ -430,7 +432,61 @@ describe('data import (dataMigration)', () => {
         assert.match(text, /stops at the first value already in InfluxDB 3/);
         assert.match(text, /t,state_id=a value=0 1672531200000/);
         assert.match(text, /1 state\(s\) have no data/);
-        assert.match(text, /1 measurement\(s\) of the old database belong to no state selected here.*other/);
+        assert.match(text, /1 measurement\(s\) of the old database are not selected/);
+        assert.match(text, /1 belong to no state of the influxdb settings .*: other/);
         assert.equal(target.written.length, 0);
+    });
+
+    describe('unselected old measurements are explained', () => {
+        const owners = new Map<string, MeasurementOwner>([
+            ['BAWIALNIA-TEMP', { id: '0_userdata.0.bawialnia.temp', instance: 'influxdb.0', configuredHere: false }],
+            ['BUFOR-TOP', { id: 'modbus.0.bufor.top', instance: 'influxdb.0', configuredHere: false }],
+            ['javascript.0.pv', { id: 'javascript.0.pv', instance: 'influxdb.1', configuredHere: false }],
+            ['FILTERED', { id: 'hm-rpc.0.x', instance: 'influxdb.0', configuredHere: true }],
+        ]);
+
+        it('groups them by owner and tells what to do', () => {
+            const text = explainUnselected(
+                ['BAWIALNIA-TEMP', 'BUFOR-TOP', 'javascript.0.pv', 'FILTERED', 'OLD-GONE'],
+                owners,
+                'influx-v3.0',
+            ).join('\n');
+            assert.match(text, /5 measurement\(s\) of the old database are not selected/);
+            assert.match(
+                text,
+                /2 belong to states logged by influxdb\.0 that are not configured for influx-v3\.0 yet, e\.g\.: BAWIALNIA-TEMP \(0_userdata\.0\.bawialnia\.temp\), BUFOR-TOP \(modbus\.0\.bufor\.top\)/,
+            );
+            assert.match(text, /choose influxdb\.0, check the preview and press "Apply"/);
+            assert.match(
+                text,
+                /1 belong to states logged by influxdb\.1 .*javascript\.0\.pv$/m,
+                'alias = id is shown once',
+            );
+            assert.match(
+                text,
+                /1 belong to states of this instance excluded by the state filter, e\.g\.: FILTERED \(hm-rpc\.0\.x\)/,
+            );
+            assert.match(
+                text,
+                /1 belong to no state of the influxdb settings \(state deleted, logging disabled or alias changed\), e\.g\.: OLD-GONE/,
+            );
+            assert.deepEqual(explainUnselected([], owners, 'influx-v3.0'), []);
+        });
+
+        it('the preview with no selected state says why and lists the owners', async () => {
+            const source = new FakeSource({ 'BAWIALNIA-TEMP': series(2, DAY) });
+            const text = await previewImport(
+                [],
+                { source, target: new FakeTarget() },
+                SETTINGS,
+                undefined,
+                'k',
+                undefined,
+                owners,
+                'influx-v3.0',
+            );
+            assert.match(text, /^No state of influx-v3\.0 is selected for the import/);
+            assert.match(text, /1 belong to states logged by influxdb\.0 that are not configured for influx-v3\.0 yet/);
+        });
     });
 });

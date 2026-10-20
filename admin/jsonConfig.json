@@ -2079,14 +2079,13 @@
                     "options": [
                         {
                             "value": "1.x",
-                            "label": "InfluxDB 1.x"
+                            "label": "opt_InfluxDB 1.x"
                         },
                         {
                             "value": "2.x",
-                            "label": "InfluxDB 2.x"
+                            "label": "opt_InfluxDB 2.x"
                         }
                     ],
-                    "noTranslation": true,
                     "newLine": true,
                     "sm": 12,
                     "md": 3,

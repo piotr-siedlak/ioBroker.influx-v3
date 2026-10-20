@@ -454,6 +454,9 @@ tests.integration(path.join(__dirname, '..'), {
             const M = `${BASE}.mig`;
             const ids = { temp: `${M}.temp`, aliased: `${M}.aliased`, sw: `${M}.switch` };
             const OLD_ALIAS = `${M}.old_alias`;
+            // logged by influxdb.0 only (settings migration not applied): the import preview must explain it
+            const notYet = `${M}.not_yet`;
+            const NOT_YET_ALIAS = `${M}.NOT-YET`;
             // outside of `${M}.*`, so the import test below does not select them
             const O = `${BASE}.oldtags`;
             const oldIds = { kot: `${O}.kot`, garage: `${O}.garage` };
@@ -469,6 +472,7 @@ tests.integration(path.join(__dirname, '..'), {
                     lines.push(`${OLD_ALIAS},room=Salon value=${i},ack=true,from="system.adapter.js.0",q=0 ${T + i * 3600000}`);
                 }
                 lines.push(`${ids.sw} value=true,ack=false,from="admin.0",q=0 ${T}`);
+                lines.push(`${NOT_YET_ALIAS} value=1,ack=true,from="admin.0",q=0 ${T}`);
                 lines.push(`${ids.sw} value=false,ack=true,from="admin.0",q=0 ${T + 60000}`);
                 const u = new globalThis.URL(`${V2.INFLUX2_URL}/api/v2/write?org=${V2.INFLUX2_ORG}&bucket=${V2.INFLUX2_BUCKET}&precision=ms`);
                 return new Promise((resolve, reject) => {
@@ -494,6 +498,12 @@ tests.integration(path.join(__dirname, '..'), {
                 );
                 await harness.objects.setObjectAsync(ids.aliased, stateObject('number', classic({ aliasId: OLD_ALIAS })));
                 await harness.objects.setObjectAsync(ids.sw, stateObject('boolean', classic({})));
+                await harness.objects.setObjectAsync(notYet, stateObject('number', classic({ aliasId: NOT_YET_ALIAS })));
+                await harness.objects.setObjectAsync('system.adapter.influxdb.0', {
+                    type: 'instance',
+                    common: { name: 'influxdb', enabled: false, mode: 'daemon', host: 'none' },
+                    native: { dbversion: '2.x', host: 'localhost', port: 8086, protocol: 'http', dbname: 'iobroker' },
+                });
                 await harness.objects.setObjectAsync(oldIds.kot, stateObject('number', classic({ customTags: [{ name: 'room', value: 'Kotłownia' }] })));
                 await harness.objects.setObjectAsync(
                     ownId,
@@ -535,6 +545,15 @@ tests.integration(path.join(__dirname, '..'), {
             after(async function () {
                 this.timeout(30000);
                 await harness?.stopAdapter();
+            });
+
+            it('the influxdb instance dropdowns get option objects with version and number of states', async function () {
+                this.timeout(20000);
+                const list = await sendTo(harness, 'listInfluxdbInstances', {});
+                const inst = list.find(o => o.value === 'influxdb.0');
+                assert.ok(inst, JSON.stringify(list));
+                assert.match(inst.label, /^influxdb\.0 \(InfluxDB 2\.x, \d+ state\(s\)\)$/);
+                assert.ok(list.every(o => typeof o === 'object' && typeof o.value === 'string'), 'no plain strings');
             });
 
             it('the live preview translates tags with the (unsaved) rules and lists what does not fit', async function () {
@@ -716,6 +735,8 @@ tests.integration(path.join(__dirname, '..'), {
                 const html = (await harness.states.getStateAsync('influx-v3.0.info.dataMigration.preview')).val;
                 assert.match(html, /3 state\(s\) of this instance are selected/);
                 assert.match(html, new RegExp(`old measurement &quot;${OLD_ALIAS.replace(/\./g, '\\.')}&quot;`));
+                assert.match(html, /belong to states logged by influxdb\.0 that are not configured for influx-v3\.0 yet/);
+                assert.ok(html.includes(`${NOT_YET_ALIAS} (${notYet})`), 'alias and state id of the unconfigured state');
                 const start = await sendTo(harness, 'dmStart', {});
                 assert.match(start.result, /Import of 3 state\(s\) started/);
                 const status = await waitFor(async () => {

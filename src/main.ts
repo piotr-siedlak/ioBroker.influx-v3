@@ -26,6 +26,7 @@ import {
     type ImportItem,
     type ImportTarget,
     type JobOutcome,
+    type MeasurementOwner,
     jobKey,
     newCheckpoint,
     parseDataMigrationConfig,
@@ -1718,10 +1719,41 @@ export class InfluxV3Adapter extends utils.Adapter {
         return out;
     }
 
+    /**
+     * Options of the "influxdb instance" dropdowns: `{value, label}` objects (Admin cannot draw plain strings), with the
+     * database version and the number of states each instance logs.
+     */
     private async handleListInfluxdbInstances(msg: ioBroker.Message): Promise<void> {
-        const objs = await this.getForeignObjectsAsync('system.adapter.influxdb.*', 'instance');
-        const list = Object.keys(objs).map(id => id.replace('system.adapter.', ''));
-        this.reply(msg, list.length ? list : [{ value: '', label: 'no influxdb instance found' }]);
+        try {
+            const objs = await this.getForeignObjectsAsync('system.adapter.influxdb.*', 'instance');
+            const ids = Object.keys(objs)
+                .map(id => id.replace('system.adapter.', ''))
+                .filter(id => /^influxdb\.\d+$/.test(id))
+                .sort();
+            if (!ids.length) {
+                return this.reply(msg, [{ value: '', label: 'no influxdb instance found' }]);
+            }
+            const view = await this.getObjectViewAsync('system', 'custom', {});
+            const counts = new Map<string, number>();
+            for (const r of (view?.rows ?? []) as unknown as { value: Record<string, unknown> }[]) {
+                for (const id of ids) {
+                    if ((r.value?.[id] as { enabled?: unknown } | undefined)?.enabled) {
+                        counts.set(id, (counts.get(id) ?? 0) + 1);
+                    }
+                }
+            }
+            this.reply(
+                msg,
+                ids.map(id => {
+                    const n = (objs[`system.adapter.${id}`]?.native ?? {}) as Record<string, unknown>;
+                    const db = n.dbversion === '2.x' ? 'InfluxDB 2.x' : 'InfluxDB 1.x';
+                    return { value: id, label: `${id} (${db}, ${counts.get(id) ?? 0} state(s))` };
+                }),
+            );
+        } catch (e) {
+            this.log.debug(`influxdb instances not listed: ${redact(e)}`);
+            this.reply(msg, []); // a dropdown needs a list
+        }
     }
 
     private async handleMigration(msg: ioBroker.Message, mode: 'preview' | 'html' | 'apply'): Promise<void> {
@@ -2128,6 +2160,24 @@ export class InfluxV3Adapter extends utils.Adapter {
         return id;
     }
 
+    /** Old measurement → ioBroker state of the influxdb settings (alias, else the id), for the explanations */
+    private async dmOwners(): Promise<Map<string, MeasurementOwner>> {
+        const view = await this.getObjectViewAsync('system', 'custom', {});
+        const owners = new Map<string, MeasurementOwner>();
+        for (const r of (view?.rows ?? []) as unknown as { id: string; value: Record<string, unknown> }[]) {
+            const custom = r.value ?? {};
+            const here = !!(custom[this.namespace] as { enabled?: unknown } | undefined)?.enabled;
+            for (const [instance, c] of Object.entries(custom)) {
+                const cfg = c as { enabled?: unknown; aliasId?: unknown } | undefined;
+                if (/^influxdb\.\d+$/.test(instance) && cfg?.enabled) {
+                    const alias = typeof cfg.aliasId === 'string' ? cfg.aliasId.trim() : '';
+                    owners.set(alias || r.id, { id: r.id, instance, configuredHere: here });
+                }
+            }
+        }
+        return owners;
+    }
+
     private async dmItems(job: DataMigrationSettings, rules: readonly TagRule[]): Promise<ImportItem[]> {
         const filter = compileStateFilter(job.stateFilter);
         const view = await this.getObjectViewAsync('system', 'custom', {});
@@ -2331,6 +2381,9 @@ export class InfluxV3Adapter extends utils.Adapter {
                 job,
                 cp,
                 this.dmKey(source, job, rules),
+                { detailed: 15, samples: 2 },
+                await this.dmOwners(),
+                this.namespace,
             );
             const retention = await this.client?.getRetentionMs().catch(() => undefined);
             if (retention) {
@@ -2358,8 +2411,20 @@ export class InfluxV3Adapter extends utils.Adapter {
         }
         const items = await this.dmItems(job, rules);
         if (!items.length) {
+            const pending = new Map<string, number>();
+            for (const o of (await this.dmOwners()).values()) {
+                if (!o.configuredHere) {
+                    pending.set(o.instance, (pending.get(o.instance) ?? 0) + 1);
+                }
+            }
+            const hint = [...pending.entries()]
+                .map(
+                    ([inst, n]) =>
+                        `${n} state(s) of ${inst} are not configured for ${this.namespace} yet: tab "Migration of settings" → choose ${inst} → "Apply".`,
+                )
+                .join(' ');
             return this.reply(msg, {
-                error: 'No state of this instance matches the selection - configure the states first (tab "Migration of settings")',
+                error: `No state of this instance matches the selection, nothing to import. ${hint || 'Configure the states for this instance first (tab "Migration of settings").'}`,
             });
         }
         const key = this.dmKey(source, job, rules);

@@ -12,6 +12,7 @@ exports.jobKey = jobKey;
 exports.newCheckpoint = newCheckpoint;
 exports.chunkLines = chunkLines;
 exports.adaptWindow = adaptWindow;
+exports.explainUnselected = explainUnselected;
 exports.previewImport = previewImport;
 /**
  * Import of historical data from the database of the classic influxdb adapter (ADR-0006).
@@ -506,6 +507,51 @@ class DataMigrationJob {
 }
 exports.DataMigrationJob = DataMigrationJob;
 /**
+ * Explains the old measurements that are not selected for the import: which belong to states that only the
+ * influxdb adapter logs (settings migration not applied yet), which are excluded by the state filter and which
+ * belong to no known state.
+ *
+ * @param others measurements of the old database that are not selected
+ * @param owners measurement → owner (from the influxdb settings)
+ * @param target this instance, e.g. influx-v3.0
+ */
+function explainUnselected(others, owners, target) {
+    if (!others.length) {
+        return [];
+    }
+    const example = (list, show) => `${list.slice(0, 8).map(show).join(', ')}${list.length > 8 ? ', …' : ''}`;
+    const notHere = new Map(); // influxdb instance → measurements
+    const filtered = [];
+    const unknown = [];
+    for (const m of others) {
+        const o = owners.get(m);
+        if (!o) {
+            unknown.push(m);
+        }
+        else if (o.configuredHere) {
+            filtered.push(m);
+        }
+        else {
+            notHere.set(o.instance, [...(notHere.get(o.instance) ?? []), m]);
+        }
+    }
+    const show = (m) => {
+        const o = owners.get(m);
+        return o && o.id !== m ? `${m} (${o.id})` : m;
+    };
+    const lines = ['', `${others.length} measurement(s) of the old database are not selected (not imported):`];
+    for (const [instance, list] of [...notHere.entries()].sort()) {
+        lines.push(`  ${list.length} belong to states logged by ${instance} that are not configured for ${target} yet, e.g.: ${example(list, show)}`, `      → tab "Migration of settings": choose ${instance}, check the preview and press "Apply" (copies the settings incl. the aliases), then import.`);
+    }
+    if (filtered.length) {
+        lines.push(`  ${filtered.length} belong to states of this instance excluded by the state filter, e.g.: ${example(filtered, show)}`);
+    }
+    if (unknown.length) {
+        lines.push(`  ${unknown.length} belong to no state of the influxdb settings (state deleted, logging disabled or alias changed), e.g.: ${example(unknown, m => m)}`);
+    }
+    return lines;
+}
+/**
  * Dry run: what the job would do, nothing is written.
  *
  * @param items states
@@ -517,10 +563,12 @@ exports.DataMigrationJob = DataMigrationJob;
  * @param key job key
  * @param opts limits
  */
-async function previewImport(items, deps, settings, checkpoint, key, opts = { detailed: 15, samples: 2 }) {
+async function previewImport(items, deps, settings, checkpoint, key, opts = { detailed: 15, samples: 2 }, owners = new Map(), target = 'this instance') {
     const lines = [];
     const day = (t) => new Date(t).toISOString().replace('T', ' ').slice(0, 19);
-    lines.push(`${items.length} state(s) of this instance are selected for the import.`);
+    lines.push(items.length
+        ? `${items.length} state(s) of this instance are selected for the import.`
+        : `No state of ${target} is selected for the import - only states configured for this instance can be imported (their table, type and tags come from these settings).`);
     if (checkpoint && checkpoint.jobKey === key && !checkpoint.finished) {
         const started = Object.values(checkpoint.states).filter(s => s.finished).length;
         lines.push(`A started import with these settings exists (${started} state(s) done, ${checkpoint.totals.points} point(s)) - "Start" continues it.`);
@@ -578,12 +626,7 @@ async function previewImport(items, deps, settings, checkpoint, key, opts = { de
     try {
         const all = await deps.source.listMeasurements(20_000);
         const known = new Set(items.map(i => i.measurement));
-        const others = all.filter(m => !known.has(m));
-        if (others.length) {
-            lines.push('', `${others.length} measurement(s) of the old database belong to no state selected here (not imported), e.g.: ${others
-                .slice(0, 8)
-                .join(', ')}`, 'Configure these states for this instance first (tab "Migration of settings") if you need their history.');
-        }
+        lines.push(...explainUnselected(all.filter(m => !known.has(m)), owners, target));
     }
     catch (e) {
         lines.push('', `List of old measurements not available: ${e instanceof Error ? e.message : (0, redact_1.redact)(e)}`);

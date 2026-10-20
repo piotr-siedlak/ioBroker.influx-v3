@@ -247,6 +247,8 @@
     "opt_Field": "Pole",
     "opt_Grouped (recommended)": "Grupowy (zalecany)",
     "opt_ID": "ID",
+    "opt_InfluxDB 1.x": "InfluxDB 1.x",
+    "opt_InfluxDB 2.x": "InfluxDB 2.x",
     "opt_InfluxDB 3 Core": "InfluxDB 3 Core",
     "opt_InfluxDB 3 Enterprise": "InfluxDB 3 Enterprise",
     "opt_Keep as entered": "Bez zmian",
