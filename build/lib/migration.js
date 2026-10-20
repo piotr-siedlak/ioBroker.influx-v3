@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.mapInfluxdbConfig = mapInfluxdbConfig;
 exports.buildMigrationPreview = buildMigrationPreview;
+exports.collectOldTags = collectOldTags;
 exports.planSettingsMigration = planSettingsMigration;
 exports.formatSettingsPreview = formatSettingsPreview;
 exports.preformattedHtml = preformattedHtml;
@@ -75,6 +76,29 @@ function buildMigrationPreview(objects, sourceInstance, targetNamespace) {
     return items.sort((a, b) => a.id.localeCompare(b.id));
 }
 /**
+ * Old custom tags of the states enabled in the given influxdb instance(s).
+ *
+ * @param objects rows of the `system/custom` view
+ * @param source `influxdb.N`, or '' for all influxdb instances
+ */
+function collectOldTags(objects, source) {
+    const perState = [];
+    for (const o of objects) {
+        const keys = source ? [source] : Object.keys(o.custom ?? {}).filter(k => /^influxdb\.\d+$/.test(k));
+        const tags = [];
+        for (const k of keys) {
+            const src = o.custom?.[k];
+            if (src && typeof src === 'object' && src.enabled) {
+                tags.push(...(mapInfluxdbConfig(src).customTags ?? []));
+            }
+        }
+        if (tags.length) {
+            perState.push(tags);
+        }
+    }
+    return (0, tagMapping_1.buildOldTagInventory)(perState);
+}
+/**
  * Plans the settings migration: which states are configured and with which tags.
  *
  * @param objects rows of the `system/custom` view
@@ -116,6 +140,7 @@ function planSettingsMigration(objects, source, target, opts) {
         todo.push({ ...item, tagResult, config });
     }
     return {
+        inventory: collectOldTags(objects, source),
         source,
         target,
         total: preview.length,
@@ -134,6 +159,10 @@ function formatSettingsPreview(plan, maxStates = 60) {
     const lines = [
         `${plan.total} state(s) are logged by ${plan.source}: ${plan.todo.length} will be configured for ${plan.target}${plan.skipped ? `, ${plan.skipped} already configured (skipped).` : '.'}`,
     ];
+    const inventory = (0, tagMapping_1.describeInventory)(plan.inventory);
+    if (inventory.length) {
+        lines.push('', `Custom tags in the settings of ${plan.source} (value (states)):`, ...inventory.map(l => `    ${l}`));
+    }
     const withTags = plan.todo.filter(p => p.tagResult.outcomes.length);
     const withoutTags = plan.todo.length - withTags.length;
     const listed = [...withTags, ...plan.todo.filter(p => !p.tagResult.outcomes.length)].slice(0, maxStates);

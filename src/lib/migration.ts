@@ -5,7 +5,15 @@
  * with the tag rules (ADR-0006); historical data is imported separately (dataMigration.ts).
  */
 import type { TagDefinition, TagKeyStyle, TagPair } from './config';
-import { applyTagRules, describeOutcome, type TagMappingResult, type TagRule } from './tagMapping';
+import {
+    applyTagRules,
+    buildOldTagInventory,
+    describeInventory,
+    describeOutcome,
+    type OldTagInventory,
+    type TagMappingResult,
+    type TagRule,
+} from './tagMapping';
 
 export interface MigrationItem {
     id: string;
@@ -110,6 +118,35 @@ export interface SettingsMigrationPlan {
     skipped: number;
     /** `key=value` of old tags that are not written → number of states and reason */
     unmatched: Map<string, { count: number; reason: string }>;
+    /** all old custom tags of the source instance */
+    inventory: OldTagInventory;
+}
+
+/**
+ * Old custom tags of the states enabled in the given influxdb instance(s).
+ *
+ * @param objects rows of the `system/custom` view
+ * @param source `influxdb.N`, or '' for all influxdb instances
+ */
+export function collectOldTags(
+    objects: { id: string; custom: Record<string, unknown> }[],
+    source: string,
+): OldTagInventory {
+    const perState: TagPair[][] = [];
+    for (const o of objects) {
+        const keys = source ? [source] : Object.keys(o.custom ?? {}).filter(k => /^influxdb\.\d+$/.test(k));
+        const tags: TagPair[] = [];
+        for (const k of keys) {
+            const src = o.custom?.[k] as Record<string, unknown> | undefined;
+            if (src && typeof src === 'object' && src.enabled) {
+                tags.push(...((mapInfluxdbConfig(src).customTags as TagPair[] | undefined) ?? []));
+            }
+        }
+        if (tags.length) {
+            perState.push(tags);
+        }
+    }
+    return buildOldTagInventory(perState);
 }
 
 /**
@@ -164,6 +201,7 @@ export function planSettingsMigration(
         todo.push({ ...item, tagResult, config });
     }
     return {
+        inventory: collectOldTags(objects, source),
         source,
         target,
         total: preview.length,
@@ -185,6 +223,14 @@ export function formatSettingsPreview(plan: SettingsMigrationPlan, maxStates = 6
             plan.skipped ? `, ${plan.skipped} already configured (skipped).` : '.'
         }`,
     ];
+    const inventory = describeInventory(plan.inventory);
+    if (inventory.length) {
+        lines.push(
+            '',
+            `Custom tags in the settings of ${plan.source} (value (states)):`,
+            ...inventory.map(l => `    ${l}`),
+        );
+    }
     const withTags = plan.todo.filter(p => p.tagResult.outcomes.length);
     const withoutTags = plan.todo.length - withTags.length;
     const listed = [...withTags, ...plan.todo.filter(p => !p.tagResult.outcomes.length)].slice(0, maxStates);

@@ -1,7 +1,18 @@
 import { strict as assert } from 'node:assert';
 import type { TagDefinition } from '../../src/lib/config';
 import { formatSettingsPreview, planSettingsMigration, preformattedHtml } from '../../src/lib/migration';
-import { applyTagRules, canonicalTag, findTagRule, parseTagRules } from '../../src/lib/tagMapping';
+import {
+    applyTagRules,
+    buildOldTagInventory,
+    canonicalTag,
+    describeInventory,
+    findTagRule,
+    foldText,
+    parseTagRules,
+    ruleToRow,
+    ruleValues,
+    suggestTagRules,
+} from '../../src/lib/tagMapping';
 
 const CATALOG: TagDefinition[] = [
     { key: 'Location', values: ['KOTLOWNIA', 'SALON'], allowOther: false, defaultValue: '', description: '' },
@@ -22,11 +33,41 @@ describe('tag rules (migration)', () => {
             warnings,
         );
         assert.deepEqual(rules, [
-            { fromKey: 'room', fromValue: '', toKey: 'Location', toValue: '' },
-            { fromKey: 'a', fromValue: '', toKey: '', toValue: '' },
+            { fromKey: 'room', fromValues: [], toKey: 'Location', toValue: '' },
+            { fromKey: 'a', fromValues: [], toKey: '', toValue: '' },
         ]);
         assert.equal(warnings.length, 2);
         assert.deepEqual(parseTagRules({ 0: { fromKey: 'k', toKey: '-' } }).length, 1, 'index-keyed object');
+    });
+
+    it('old values are a list (multi-select) or one string from rules saved before', () => {
+        assert.deepEqual(ruleValues(['Kotłownia', ' kotłownia ', '', 'Salon']), ['Kotłownia', 'Salon']);
+        assert.deepEqual(ruleValues('Garage'), ['Garage']);
+        assert.deepEqual(ruleValues(''), []);
+        assert.deepEqual(ruleValues(undefined), []);
+        const [r] = parseTagRules([{ fromKey: 'room', fromValue: ['A', 'B'], toKey: 'Location', toValue: 'SALON' }]);
+        assert.deepEqual(r.fromValues, ['A', 'B']);
+        assert.deepEqual(ruleToRow(r), { fromKey: 'room', fromValue: ['A', 'B'], toKey: 'Location', toValue: 'SALON' });
+    });
+
+    it('one rule maps several old values', () => {
+        const rules = parseTagRules([
+            {
+                fromKey: 'room',
+                fromValue: ['Kotłownia', 'boiler room', 'KOTL'],
+                toKey: 'Location',
+                toValue: 'KOTLOWNIA',
+            },
+            { fromKey: 'room', toKey: 'Location' },
+        ]);
+        for (const v of ['Kotłownia', 'Boiler Room', 'kotl']) {
+            assert.deepEqual(applyTagRules([{ key: 'room', value: v }], rules, CATALOG, 'snake').tags, [
+                { key: 'Location', value: 'KOTLOWNIA' },
+            ]);
+        }
+        assert.deepEqual(applyTagRules([{ key: 'room', value: 'salon' }], rules, CATALOG, 'snake').tags, [
+            { key: 'Location', value: 'SALON' },
+        ]);
     });
 
     it('a rule for the exact value wins over a rule for every value, otherwise table order', () => {
@@ -167,6 +208,10 @@ describe('settings migration plan', () => {
         assert.match(text, /3 state\(s\) are logged by influxdb\.0: 2 will be configured/);
         assert.match(text, /room=Kotlownia → Location=KOTLOWNIA \(rule 1\)/);
         assert.match(text, /floor=1 - 1 state\(s\)/);
+        assert.match(
+            text,
+            /Custom tags in the settings of influxdb\.0 \(value \(states\)\):\n {4}floor: 1 \(1\)\n {4}room: Kotlownia \(1\)/,
+        );
         // states with tag changes are listed first
         assert.ok(text.indexOf('a.0.temp') < text.indexOf('a.0.plain'));
     });
@@ -196,5 +241,90 @@ describe('settings migration plan', () => {
         const html = preformattedHtml('<img src=x onerror=alert(1)> & "q"');
         assert.ok(!html.includes('<img'));
         assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt; &amp; &quot;q&quot;/);
+    });
+});
+
+describe('old tags of the influxdb settings', () => {
+    const inv = buildOldTagInventory([
+        [
+            { key: 'room', value: 'Kotłownia' },
+            { key: 'floor', value: '1' },
+        ],
+        [{ key: 'Room', value: 'Kotłownia' }],
+        [{ key: 'room', value: 'Salon' }],
+        [{ key: 'room', value: 'kotlownia' }],
+        [{ key: 'room', value: 'Garaż' }],
+        [
+            { key: 'source', value: 'zigbee' },
+            { key: 'floor', value: '2' },
+        ],
+        [{ key: 'device', value: 'Pump 1' }],
+    ]);
+
+    it('collects keys ignoring case with every value and the number of states', () => {
+        const room = inv.keys.get('room')!;
+        assert.equal(room.key, 'room');
+        assert.equal(room.states, 5);
+        assert.deepEqual(
+            [...room.values.entries()],
+            [
+                ['Kotłownia', 2],
+                ['Salon', 1],
+                ['kotlownia', 1],
+                ['Garaż', 1],
+            ],
+        );
+        assert.deepEqual(describeInventory(inv), [
+            'device: Pump 1 (1)',
+            'floor: 1 (1), 2 (1)',
+            'room: Kotłownia (2), Garaż (1), kotlownia (1), Salon (1)',
+            'source: zigbee (1)',
+        ]);
+    });
+
+    it('folds case, diacritics and punctuation only for suggestions', () => {
+        assert.equal(foldText('Kotłownia'), 'kotlownia');
+        assert.equal(foldText('KOTLOWNIA'), 'kotlownia');
+        assert.equal(foldText('Garaż'), 'garaz');
+        assert.equal(foldText('Pump-1'), 'pump1');
+        // automatic mapping stays case-only: Kotłownia is not mapped without a rule
+        const r = applyTagRules([{ key: 'Location', value: 'Kotłownia' }], [], CATALOG, 'snake');
+        assert.equal(r.outcomes[0].status, 'rejected');
+    });
+
+    it('suggests the rows that are still needed, grouping old values per suggested catalog value', () => {
+        // no rules yet: room and floor and source have no catalog key, device fits as is
+        assert.deepEqual(suggestTagRules(inv, [], CATALOG, 'snake'), [
+            { fromKey: 'floor', fromValues: [], toKey: '', toValue: '' },
+            { fromKey: 'room', fromValues: [], toKey: '', toValue: '' },
+            { fromKey: 'source', fromValues: [], toKey: '', toValue: '' },
+        ]);
+        // after choosing the new key for room (and removing source), the value rows follow
+        const rules = parseTagRules([
+            { fromKey: 'room', toKey: 'Location' },
+            { fromKey: 'source', toKey: '-' },
+        ]);
+        assert.deepEqual(suggestTagRules(inv, rules, CATALOG, 'snake'), [
+            { fromKey: 'floor', fromValues: [], toKey: '', toValue: '' },
+            { fromKey: 'room', fromValues: ['Kotłownia'], toKey: 'Location', toValue: 'KOTLOWNIA' },
+            { fromKey: 'room', fromValues: ['Garaż'], toKey: 'Location', toValue: '' },
+        ]);
+        // values with a rule of their own are left alone; nothing is suggested twice
+        const done = parseTagRules([
+            ...rules.map(ruleToRow),
+            { fromKey: 'room', fromValue: ['Kotłownia', 'Garaż'], toKey: 'Location', toValue: 'KOTLOWNIA' },
+            { fromKey: 'floor', toKey: '-' },
+        ]);
+        assert.deepEqual(suggestTagRules(inv, done, CATALOG, 'snake'), []);
+    });
+
+    it('several old values with the same suggestion share one row', () => {
+        const inv2 = buildOldTagInventory([
+            [{ key: 'Location', value: 'Kotłownia' }],
+            [{ key: 'location', value: 'kotłownia!' }],
+        ]);
+        assert.deepEqual(suggestTagRules(inv2, [], CATALOG, 'snake'), [
+            { fromKey: 'Location', fromValues: ['Kotłownia', 'kotłownia!'], toKey: 'Location', toValue: 'KOTLOWNIA' },
+        ]);
     });
 });

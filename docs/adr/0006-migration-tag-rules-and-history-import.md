@@ -104,3 +104,34 @@ Runs inside the adapter as a background job; it is **read-only on the source** a
 5. Admin: rules table + live preview in *Migration of settings*; new tab *Migration of data*; 11 languages.
 6. Tests (unit, real 1.x/2.x → 3, harness), test-server script and CI job for the legacy servers.
 7. Documentation (README EN/PL, ARCHITECTURE), changelog, rebuild, commit.
+
+## Extension (2026-10-20): old tags taken from the existing configuration
+
+Problem: the user had to type old keys and values by hand, although they are already known – they are the custom
+tags in `common.custom["influxdb.N"]` of the logged states – and one tag key usually has several values
+(`room` = Kotłownia, Salon, Garaż …) that often map to the same catalog value.
+
+Decision:
+
+1. **Inventory of old tags**: from the custom tags of all states enabled in the chosen `influxdb.N` (all
+   `influxdb.*` instances if none is chosen): key (grouped ignoring case, first spelling kept) → values → number of
+   states. Built on request from the `system/custom` view, cached for a few seconds.
+2. **Several old values per rule**: the old-value column holds a list (empty list = every value). A rule whose list
+   contains the old value wins over a rule for every value, otherwise table order. A plain string (rules saved before)
+   is read as a list with one value, so existing settings keep working.
+3. **Admin**: *Old key* offers the keys of the inventory with value/state counts (typing other keys stays possible,
+   e.g. for tags that exist only in old points); *Old values* is a multi-select of the values of that key with state
+   counts. The live preview starts with the inventory (`room: Kotłownia (5), Salon (3), Garaż (1)`).
+4. **"Take over old tags"** button: appends the rule rows that are still needed, never changes existing rows:
+   * an old key without catalog match and without rule → one row "key, every value" with an empty new key to choose;
+   * values that the catalog would reject for a known target key → grouped by a suggested catalog value (equal when
+     case, diacritics and punctuation are ignored: `Kotłownia` → `KOTLOWNIA`), one row with several old values per
+     suggestion; values without suggestion get one row each with an empty new value;
+   * pressing it again after new keys were chosen adds the value rows of those keys.
+   Similarity is only used for these visible suggestions – automatic canonicalisation stays case-only.
+5. Commands `getOldTagKeys`, `getOldTagValues`, `migrationSuggestRules`; the import of historical data uses the
+   same rules unchanged.
+
+Plan: (a) rule format with value lists + compatibility, (b) inventory and suggestions as pure functions with unit
+tests, (c) commands and preview, (d) Admin columns/button + 11 languages, (e) harness test of lists, suggestions and
+apply with a multi-value rule, (f) docs.

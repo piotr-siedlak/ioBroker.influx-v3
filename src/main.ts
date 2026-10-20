@@ -11,6 +11,7 @@ import {
     type InstanceConfig,
     normalizeInstanceConfig,
     normalizeStateConfig,
+    parseTagDefinitions,
     type StateConfig,
     stateConfigKey,
     DATABASE_NAME_RE,
@@ -44,8 +45,15 @@ import {
 import { HttpError, InfluxV3Client } from './lib/influxClient';
 import { createLegacyReader, type LegacyPoint, type LegacySourceConfig } from './lib/legacySource';
 import { type LpRecord, LineProtocolError, serialize, type FieldValue } from './lib/lineProtocol';
-import { formatSettingsPreview, planSettingsMigration, preformattedHtml } from './lib/migration';
-import { applyTagRules, parseTagRules, type TagRule } from './lib/tagMapping';
+import { collectOldTags, formatSettingsPreview, planSettingsMigration, preformattedHtml } from './lib/migration';
+import {
+    applyTagRules,
+    type OldTagInventory,
+    parseTagRules,
+    ruleToRow,
+    suggestTagRules,
+    type TagRule,
+} from './lib/tagMapping';
 import { Observability } from './lib/observability';
 import { checkReadOnlyInfluxQL, checkReadOnlySql, senderAllowed } from './lib/queryService';
 import { redact, registerSecret } from './lib/redact';
@@ -130,6 +138,8 @@ export class InfluxV3Adapter extends utils.Adapter {
     /** running import of historical data */
     private dmRun?: { ctrl: AbortController; done: Promise<JobOutcome> };
     private dmLastProgress = 0;
+    /** old custom tags of the influxdb settings (dropdowns of the rule table ask often) */
+    private oldTagCache?: { at: number; source: string; inventory: OldTagInventory };
 
     public constructor(options: Partial<utils.AdapterOptions> = {}) {
         super({ ...options, name: 'influx-v3' });
@@ -1191,6 +1201,12 @@ export class InfluxV3Adapter extends utils.Adapter {
                     return await this.handleListInfluxdbInstances(msg);
                 case 'getTagKeys':
                     return this.reply(msg, this.tagKeyOptions());
+                case 'getOldTagKeys':
+                    return this.reply(msg, await this.oldTagKeyOptions(msg.message));
+                case 'getOldTagValues':
+                    return this.reply(msg, await this.oldTagValueOptions(msg.message));
+                case 'migrationSuggestRules':
+                    return await this.handleSuggestRules(msg);
                 case 'getTagKeysForRules':
                     return this.reply(msg, [
                         ...this.cfg.tagDefinitions.map(d => ({ value: d.key, label: d.key })),
@@ -1687,7 +1703,13 @@ export class InfluxV3Adapter extends utils.Adapter {
     }
 
     private async handleMigration(msg: ioBroker.Message, mode: 'preview' | 'html' | 'apply'): Promise<void> {
-        const m = (msg.message ?? {}) as { source?: unknown; overwrite?: unknown; ids?: unknown; rules?: unknown };
+        const m = (msg.message ?? {}) as {
+            source?: unknown;
+            overwrite?: unknown;
+            ids?: unknown;
+            rules?: unknown;
+            catalog?: unknown;
+        };
         const source = typeof m.source === 'string' ? m.source : '';
         if (!/^influxdb\.\d+$/.test(source)) {
             const text = 'Select an influxdb instance (e.g. influxdb.0) first';
@@ -1705,7 +1727,8 @@ export class InfluxV3Adapter extends utils.Adapter {
             this.namespace,
             {
                 rules,
-                catalog: this.cfg.tagDefinitions,
+                // previews show the catalog being edited; apply always uses the saved one (Admin locks it otherwise)
+                catalog: mode === 'apply' ? this.cfg.tagDefinitions : this.catalogFrom(m.catalog),
                 style: this.cfg.tagKeyStyle,
                 overwrite: m.overwrite === true,
                 ids: Array.isArray(m.ids)
@@ -1740,6 +1763,70 @@ export class InfluxV3Adapter extends utils.Adapter {
         });
     }
 
+    // ------------------------------------------------------------------ old tags of the influxdb settings (ADR-0006)
+
+    private async oldTags(sourceRaw: unknown): Promise<OldTagInventory> {
+        const source = typeof sourceRaw === 'string' && /^influxdb\.\d+$/.test(sourceRaw) ? sourceRaw : '';
+        const now = Date.now();
+        if (this.oldTagCache && this.oldTagCache.source === source && now - this.oldTagCache.at < 5000) {
+            return this.oldTagCache.inventory;
+        }
+        const view = await this.getObjectViewAsync('system', 'custom', {});
+        const rows = (view?.rows ?? []) as unknown as { id: string; value: Record<string, unknown> }[];
+        const inventory = collectOldTags(
+            rows.map(r => ({ id: r.id, custom: r.value ?? {} })),
+            source,
+        );
+        this.oldTagCache = { at: now, source, inventory };
+        return inventory;
+    }
+
+    /** Tag catalog sent by the Admin page (being edited), else the saved one */
+    private catalogFrom(raw: unknown): InstanceConfig['tagDefinitions'] {
+        return raw === undefined
+            ? this.cfg.tagDefinitions
+            : parseTagDefinitions(raw, this.cfg.tagKeyStyle, this.cfg.valueField, []);
+    }
+
+    /** Options of the "old key" column: keys of the old custom tags */
+    private async oldTagKeyOptions(message: unknown): Promise<{ value: string; label: string }[]> {
+        const inv = await this.oldTags((message as { source?: unknown } | undefined)?.source);
+        return [...inv.keys.values()]
+            .sort((a, b) => a.key.localeCompare(b.key))
+            .map(e => ({
+                value: e.key,
+                label: `${e.key} (${e.values.size} value(s), ${e.states} state(s))`,
+            }));
+    }
+
+    /** Options of the "old values" column: values of the selected old key */
+    private async oldTagValueOptions(message: unknown): Promise<{ value: string; label: string }[]> {
+        const m = (message ?? {}) as { source?: unknown; key?: unknown };
+        const key = typeof m.key === 'string' ? m.key.trim().toLowerCase() : '';
+        const entry = key ? (await this.oldTags(m.source)).keys.get(key) : undefined;
+        if (!entry) {
+            return [];
+        }
+        return [...entry.values.entries()]
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([value, n]) => ({ value, label: `${value} (${n} state(s))` }));
+    }
+
+    /** "Take over old tags": appends the rule rows that are still needed (sendTo `useNative`) */
+    private async handleSuggestRules(msg: ioBroker.Message): Promise<void> {
+        const m = (msg.message ?? {}) as { source?: unknown; rules?: unknown; catalog?: unknown };
+        const rawRows = Array.isArray(m.rules)
+            ? m.rules
+            : tableRows((this.config as unknown as Record<string, unknown>).migrationTagRules);
+        const rules = parseTagRules(rawRows);
+        const inventory = await this.oldTags(m.source);
+        const added = suggestTagRules(inventory, rules, this.catalogFrom(m.catalog), this.cfg.tagKeyStyle);
+        this.reply(msg, {
+            native: { migrationTagRules: [...rawRows, ...added.map(ruleToRow)] },
+            result: added.length ? 'rulesAdded' : inventory.keys.size ? 'rulesNone' : 'noOldTags',
+            args: [String(added.length)],
+        });
+    }
     // ------------------------------------------------------------------ import of historical data (ADR-0006)
 
     private dmFile(): string {

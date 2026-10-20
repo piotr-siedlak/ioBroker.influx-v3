@@ -91,6 +91,8 @@ class InfluxV3Adapter extends utils.Adapter {
     /** running import of historical data */
     dmRun;
     dmLastProgress = 0;
+    /** old custom tags of the influxdb settings (dropdowns of the rule table ask often) */
+    oldTagCache;
     constructor(options = {}) {
         super({ ...options, name: 'influx-v3' });
         this.on('ready', this.onReady.bind(this));
@@ -1051,6 +1053,12 @@ class InfluxV3Adapter extends utils.Adapter {
                     return await this.handleListInfluxdbInstances(msg);
                 case 'getTagKeys':
                     return this.reply(msg, this.tagKeyOptions());
+                case 'getOldTagKeys':
+                    return this.reply(msg, await this.oldTagKeyOptions(msg.message));
+                case 'getOldTagValues':
+                    return this.reply(msg, await this.oldTagValueOptions(msg.message));
+                case 'migrationSuggestRules':
+                    return await this.handleSuggestRules(msg);
                 case 'getTagKeysForRules':
                     return this.reply(msg, [
                         ...this.cfg.tagDefinitions.map(d => ({ value: d.key, label: d.key })),
@@ -1535,7 +1543,8 @@ class InfluxV3Adapter extends utils.Adapter {
         const rules = (0, tagMapping_1.parseTagRules)(m.rules !== undefined ? m.rules : this.config.migrationTagRules);
         const plan = (0, migration_1.planSettingsMigration)(rows.map(r => ({ id: r.id, custom: r.value ?? {} })), source, this.namespace, {
             rules,
-            catalog: this.cfg.tagDefinitions,
+            // previews show the catalog being edited; apply always uses the saved one (Admin locks it otherwise)
+            catalog: mode === 'apply' ? this.cfg.tagDefinitions : this.catalogFrom(m.catalog),
             style: this.cfg.tagKeyStyle,
             overwrite: m.overwrite === true,
             ids: Array.isArray(m.ids)
@@ -1563,6 +1572,62 @@ class InfluxV3Adapter extends utils.Adapter {
         this.reply(msg, {
             result: `${done} state(s) configured for ${this.namespace}.${failed.length ? ` ${failed.length} failed.` : ''} ${source} was not changed.`,
             failed: failed.length ? failed : undefined,
+        });
+    }
+    // ------------------------------------------------------------------ old tags of the influxdb settings (ADR-0006)
+    async oldTags(sourceRaw) {
+        const source = typeof sourceRaw === 'string' && /^influxdb\.\d+$/.test(sourceRaw) ? sourceRaw : '';
+        const now = Date.now();
+        if (this.oldTagCache && this.oldTagCache.source === source && now - this.oldTagCache.at < 5000) {
+            return this.oldTagCache.inventory;
+        }
+        const view = await this.getObjectViewAsync('system', 'custom', {});
+        const rows = (view?.rows ?? []);
+        const inventory = (0, migration_1.collectOldTags)(rows.map(r => ({ id: r.id, custom: r.value ?? {} })), source);
+        this.oldTagCache = { at: now, source, inventory };
+        return inventory;
+    }
+    /** Tag catalog sent by the Admin page (being edited), else the saved one */
+    catalogFrom(raw) {
+        return raw === undefined
+            ? this.cfg.tagDefinitions
+            : (0, config_1.parseTagDefinitions)(raw, this.cfg.tagKeyStyle, this.cfg.valueField, []);
+    }
+    /** Options of the "old key" column: keys of the old custom tags */
+    async oldTagKeyOptions(message) {
+        const inv = await this.oldTags(message?.source);
+        return [...inv.keys.values()]
+            .sort((a, b) => a.key.localeCompare(b.key))
+            .map(e => ({
+            value: e.key,
+            label: `${e.key} (${e.values.size} value(s), ${e.states} state(s))`,
+        }));
+    }
+    /** Options of the "old values" column: values of the selected old key */
+    async oldTagValueOptions(message) {
+        const m = (message ?? {});
+        const key = typeof m.key === 'string' ? m.key.trim().toLowerCase() : '';
+        const entry = key ? (await this.oldTags(m.source)).keys.get(key) : undefined;
+        if (!entry) {
+            return [];
+        }
+        return [...entry.values.entries()]
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([value, n]) => ({ value, label: `${value} (${n} state(s))` }));
+    }
+    /** "Take over old tags": appends the rule rows that are still needed (sendTo `useNative`) */
+    async handleSuggestRules(msg) {
+        const m = (msg.message ?? {});
+        const rawRows = Array.isArray(m.rules)
+            ? m.rules
+            : (0, config_1.tableRows)(this.config.migrationTagRules);
+        const rules = (0, tagMapping_1.parseTagRules)(rawRows);
+        const inventory = await this.oldTags(m.source);
+        const added = (0, tagMapping_1.suggestTagRules)(inventory, rules, this.catalogFrom(m.catalog), this.cfg.tagKeyStyle);
+        this.reply(msg, {
+            native: { migrationTagRules: [...rawRows, ...added.map(tagMapping_1.ruleToRow)] },
+            result: added.length ? 'rulesAdded' : inventory.keys.size ? 'rulesNone' : 'noOldTags',
+            args: [String(added.length)],
         });
     }
     // ------------------------------------------------------------------ import of historical data (ADR-0006)

@@ -233,19 +233,28 @@ can run side by side during the transition. Design: [ADR-0006](docs/adr/0006-mig
 ### 1. Migration of settings (with tag rules)
 
 Choose the `influxdb.N` instance. Copied per state: enabled, filters, debounce/block time, rounding, alias, storage
-type and custom tags. Custom tags must fit the [tag catalog](#tags), so they are translated with **tag rules**:
+type and custom tags. Custom tags must fit the [tag catalog](#tags), so they are translated with **tag rules**.
 
-| Old key | Old value | New key | New value | Effect |
+The old tags are taken from the existing configuration: *Old key* offers the custom tag keys of the `influxdb.N`
+settings, *Old values* lists every value of that key with the number of states – select **one or several** values
+per rule (none = every value). **Take over old tags** fills the table automatically: one row per old key that has no
+catalog key yet (choose its new key), and for keys with a catalog key one row per catalog value suggested for the old
+values (equal when case and diacritics are ignored, e.g. `Kotłownia`, `kotlownia` → `KOTLOWNIA`); values without a
+suggestion get a row with an empty new value. Existing rows are never changed – press it again after choosing new
+keys to get the value rows of those keys.
+
+| Old key | Old values | New key | New value | Effect |
 | --- | --- | --- | --- | --- |
-| `room` | *(empty)* | `Location` | *(empty)* | `room=Salon` → `Location=SALON` (spelling adapted to the catalog) |
-| `room` | `Kotłownia` | `Location` | `KOTLOWNIA` | value renamed |
+| `room` | *(none)* | `Location` | *(empty)* | `room=Salon` → `Location=SALON` (spelling adapted to the catalog) |
+| `room` | `Kotłownia`, `Boiler room` | `Location` | `KOTLOWNIA` | several old values → one catalog value |
 | `source` | | `-` | | tag removed |
 | `typ` | | *(empty)* | `heating` | key kept, value replaced |
 
-A rule for a specific old value wins over a rule for every value. The **live preview** (updated while you edit the
+A rule for specific old values wins over a rule for every value. The **live preview** (updated while you edit the
 rules, before saving) lists per state the old tags, the result and every old `key=value` that still does not fit the
-catalog, with the number of states – add a rule or extend the catalog until the list is empty. *Apply* writes only
-tags allowed by the catalog. The same rules translate the tags stored in the old points during the data import.
+catalog, with the number of states – add a rule or extend the catalog until the list is empty; it starts with all old
+custom tags (`room: Kotłownia (5), Salon (3), Garaż (1)`). Catalog changes are used by the preview before saving;
+*Apply* needs them saved. *Apply* writes only tags allowed by the catalog. The same rules translate the tags stored in the old points during the data import.
 
 ### 2. Migration of data (import of the history)
 
@@ -318,6 +327,8 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 * (Piotr Siedlak) Settings tables are also accepted when they are stored as objects (e.g. written by scripts)
 * (Piotr Siedlak) Migration of settings: tag rules translate the custom tags of influxdb into catalog tags, with a
   live preview of the result and of the tags that still do not fit
+* (Piotr Siedlak) Tag rules: old keys and values are offered from the influxdb settings, a rule can cover several old
+  values, "Take over old tags" fills the rules automatically with suggested catalog values
 * (Piotr Siedlak) New tab "Migration of data": import of the history from InfluxDB 1.x/2.x (preview, start/stop,
   resume after restart, live progress); points are written like live values, old tags pass the tag rules
 

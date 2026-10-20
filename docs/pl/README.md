@@ -248,19 +248,30 @@ przejściowym oba adaptery mogą działać równolegle. Projekt: [ADR-0006](../a
 
 Wybierz instancję `influxdb.N`. Dla każdego stanu kopiowane są: włączenie, filtry, debounce/czas blokady,
 zaokrąglanie, alias, typ zapisu i własne tagi. Własne tagi muszą pasować do [katalogu tagów](#tagi), dlatego są
-tłumaczone **regułami tagów**:
+tłumaczone **regułami tagów**.
 
-| Stary klucz | Stara wartość | Nowy klucz | Nowa wartość | Efekt |
+Stare tagi są pobierane z istniejącej konfiguracji: *Stary klucz* podpowiada klucze własnych tagów z ustawień
+`influxdb.N`, *Stare wartości* pokazuje wszystkie wartości tego klucza z liczbą stanów – w jednej regule można wybrać
+**jedną lub kilka** wartości (brak = każda wartość). **Przejmij stare tagi** wypełnia tabelę automatycznie: jeden
+wiersz dla każdego starego klucza bez odpowiednika w katalogu (wybierz nowy klucz), a dla kluczy z katalogu jeden
+wiersz na każdą wartość katalogu zaproponowaną dla starych wartości (równą po pominięciu wielkości liter i znaków
+diakrytycznych, np. `Kotłownia`, `kotlownia` → `KOTLOWNIA`); wartości bez propozycji dostają wiersz z pustą nową
+wartością. Istniejące wiersze nigdy nie są zmieniane – po wybraniu nowych kluczy naciśnij ponownie, aby dostać wiersze
+wartości tych kluczy.
+
+| Stary klucz | Stare wartości | Nowy klucz | Nowa wartość | Efekt |
 | --- | --- | --- | --- | --- |
-| `room` | *(puste)* | `Location` | *(puste)* | `room=Salon` → `Location=SALON` (pisownia dopasowana do katalogu) |
-| `room` | `Kotłownia` | `Location` | `KOTLOWNIA` | zmiana wartości |
+| `room` | *(brak)* | `Location` | *(puste)* | `room=Salon` → `Location=SALON` (pisownia dopasowana do katalogu) |
+| `room` | `Kotłownia`, `Boiler room` | `Location` | `KOTLOWNIA` | kilka starych wartości → jedna wartość z katalogu |
 | `source` | | `-` | | tag usunięty |
 | `typ` | | *(puste)* | `heating` | klucz bez zmian, nowa wartość |
 
-Reguła dla konkretnej starej wartości ma pierwszeństwo przed regułą dla każdej wartości. **Podgląd na żywo**
+Reguła dla konkretnych starych wartości ma pierwszeństwo przed regułą dla każdej wartości. **Podgląd na żywo**
 (aktualizowany podczas edycji reguł, jeszcze przed zapisem) pokazuje dla każdego stanu stare tagi, wynik oraz każdą
 starą parę `klucz=wartość`, która nadal nie pasuje do katalogu, z liczbą stanów – dodaj regułę albo rozszerz katalog,
-aż lista będzie pusta. *Zastosuj* zapisuje tylko tagi dozwolone przez katalog. Te same reguły tłumaczą tagi zapisane
+aż lista będzie pusta; na początku podglądu są wszystkie stare własne tagi (`room: Kotłownia (5), Salon (3), Garaż (1)`).
+Zmiany katalogu podgląd uwzględnia jeszcze przed zapisem; *Zastosuj* wymaga ich zapisania. *Zastosuj* zapisuje tylko
+tagi dozwolone przez katalog. Te same reguły tłumaczą tagi zapisane
 w starych punktach podczas importu danych.
 
 ### 2. Migracja danych (import historii)

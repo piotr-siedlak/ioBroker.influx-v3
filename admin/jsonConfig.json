@@ -1729,13 +1729,34 @@
                 },
                 "_rulesInfo": {
                     "type": "staticText",
-                    "text": "txt_tag_rules",
+                    "text": "txt_tag_rules_auto",
                     "newLine": true,
                     "sm": 12,
                     "xs": 12,
                     "md": 12,
                     "lg": 12,
                     "xl": 12
+                },
+                "_suggestRules": {
+                    "type": "sendTo",
+                    "command": "migrationSuggestRules",
+                    "useNative": true,
+                    "variant": "outlined",
+                    "showProcess": true,
+                    "newLine": true,
+                    "sm": 12,
+                    "md": 4,
+                    "hidden": "!_alive",
+                    "label": "Take over old tags",
+                    "jsonData": "{\"source\": ${JSON.stringify(data.migrationSource || '')}, \"rules\": ${JSON.stringify(data.migrationTagRules || [])}, \"catalog\": ${JSON.stringify(data.tagDefinitions || [])}}",
+                    "result": {
+                        "rulesAdded": "res_rules_added",
+                        "rulesNone": "res_rules_none",
+                        "noOldTags": "res_no_old_tags"
+                    },
+                    "xs": 12,
+                    "lg": 4,
+                    "xl": 4
                 },
                 "migrationTagRules": {
                     "type": "table",
@@ -1745,30 +1766,37 @@
                     "label": "Tag rules",
                     "items": [
                         {
-                            "type": "text",
+                            "type": "autocompleteSendTo",
                             "attr": "fromKey",
-                            "width": "22%",
+                            "width": "20%",
                             "default": "",
+                            "freeSolo": true,
+                            "noTranslation": true,
                             "title": "Old key",
-                            "placeholder": "room",
-                            "maxLength": 255,
-                            "validator": "!!(data.fromKey || '').trim() || (!data.fromValue && !data.toKey && !data.toValue)",
+                            "command": "getOldTagKeys",
+                            "jsonData": "{\"source\": ${JSON.stringify(globalData.migrationSource || '')}}",
+                            "validator": "!!(data.fromKey || '').trim() || ((Array.isArray(data.fromValue) ? !data.fromValue.length : !data.fromValue) && !data.toKey && !data.toValue)",
                             "validatorErrorText": "err_old_key_missing",
                             "validatorNoSaveOnError": true
                         },
                         {
-                            "type": "text",
+                            "type": "selectSendTo",
                             "attr": "fromValue",
-                            "width": "22%",
-                            "default": "",
-                            "title": "Old value (empty = every)",
-                            "placeholder": "Kotłownia",
-                            "maxLength": 1024
+                            "width": "30%",
+                            "default": [],
+                            "multiple": true,
+                            "noTranslation": true,
+                            "title": "Old values (none = every value)",
+                            "command": "getOldTagValues",
+                            "jsonData": "{\"source\": ${JSON.stringify(globalData.migrationSource || '')}, \"key\": ${JSON.stringify(data.fromKey || '')}}",
+                            "alsoDependsOn": [
+                                "fromKey"
+                            ]
                         },
                         {
                             "type": "autocompleteSendTo",
                             "attr": "toKey",
-                            "width": "28%",
+                            "width": "25%",
                             "default": "",
                             "freeSolo": true,
                             "title": "New key (empty = keep, - = remove)",
@@ -1780,7 +1808,7 @@
                         {
                             "type": "autocompleteSendTo",
                             "attr": "toValue",
-                            "width": "28%",
+                            "width": "25%",
                             "default": "",
                             "freeSolo": true,
                             "title": "New value (empty = keep)",
@@ -1804,13 +1832,28 @@
                     "newLine": true,
                     "sm": 12,
                     "label": "Preview of the migration (nothing is changed)",
-                    "jsonData": "{\"source\": \"${data.migrationSource}\", \"overwrite\": ${!!data.migrationOverwrite}, \"rules\": ${JSON.stringify(data.migrationTagRules || [])}}",
+                    "jsonData": "{\"source\": \"${data.migrationSource}\", \"overwrite\": ${!!data.migrationOverwrite}, \"rules\": ${JSON.stringify(data.migrationTagRules || [])}, \"catalog\": ${JSON.stringify(data.tagDefinitions || [])}}",
                     "alsoDependsOn": [
                         "migrationSource",
                         "migrationOverwrite",
-                        "migrationTagRules"
+                        "migrationTagRules",
+                        "tagDefinitions"
                     ],
                     "hidden": "!_alive || !data.migrationSource",
+                    "xs": 12,
+                    "md": 12,
+                    "lg": 12,
+                    "xl": 12
+                },
+                "_catalogUnsaved": {
+                    "type": "staticText",
+                    "text": "txt_catalog_unsaved",
+                    "newLine": true,
+                    "sm": 12,
+                    "hidden": "JSON.stringify(data.tagDefinitions || []) === JSON.stringify(originalData.tagDefinitions || [])",
+                    "style": {
+                        "color": "orange"
+                    },
                     "xs": 12,
                     "md": 12,
                     "lg": 12,
@@ -1826,7 +1869,8 @@
                     "sm": 6,
                     "md": 3,
                     "hidden": "!_alive || !data.migrationSource",
-                    "jsonData": "{\"source\": \"${data.migrationSource}\", \"overwrite\": ${!!data.migrationOverwrite}, \"rules\": ${JSON.stringify(data.migrationTagRules || [])}}",
+                    "disabled": "JSON.stringify(data.tagDefinitions || []) !== JSON.stringify(originalData.tagDefinitions || [])",
+                    "jsonData": "{\"source\": \"${data.migrationSource}\", \"overwrite\": ${!!data.migrationOverwrite}, \"rules\": ${JSON.stringify(data.migrationTagRules || [])}, \"catalog\": ${JSON.stringify(data.tagDefinitions || [])}}",
                     "confirm": {
                         "text": "confirm_migration_rules",
                         "title": "Apply",

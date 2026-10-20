@@ -430,6 +430,9 @@ tests.integration(path.join(__dirname, '..'), {
             const M = `${BASE}.mig`;
             const ids = { temp: `${M}.temp`, aliased: `${M}.aliased`, sw: `${M}.switch` };
             const OLD_ALIAS = `${M}.old_alias`;
+            // outside of `${M}.*`, so the import test below does not select them
+            const O = `${BASE}.oldtags`;
+            const oldIds = { kot: `${O}.kot`, garage: `${O}.garage` };
             const RULES = [{ fromKey: 'room', fromValue: '', toKey: 'Location', toValue: '' }];
             const T = Date.UTC(2024, 0, 1);
 
@@ -465,6 +468,11 @@ tests.integration(path.join(__dirname, '..'), {
                 );
                 await harness.objects.setObjectAsync(ids.aliased, stateObject('number', classic({ aliasId: OLD_ALIAS })));
                 await harness.objects.setObjectAsync(ids.sw, stateObject('boolean', classic({})));
+                await harness.objects.setObjectAsync(oldIds.kot, stateObject('number', classic({ customTags: [{ name: 'room', value: 'Kotłownia' }] })));
+                await harness.objects.setObjectAsync(
+                    oldIds.garage,
+                    stateObject('number', classic({ customTags: [{ name: 'room', value: 'Garaż' }, { name: 'floor', value: '2' }] })),
+                );
                 if (V2) {
                     await seedOld();
                 }
@@ -507,6 +515,48 @@ tests.integration(path.join(__dirname, '..'), {
                 assert.ok(!withRules.text.includes('<script'), 'escaped HTML only');
                 const without = await sendTo(harness, 'migrationPreviewHtml', { source: 'influxdb.0', overwrite: false, rules: [] });
                 assert.match(without.text, /room=kotlownia ✗ key &quot;room&quot; is not defined in the tag catalog/);
+            });
+
+            it('old keys and their values (several per key) are offered from the influxdb settings', async function () {
+                this.timeout(20000);
+                const keys = await sendTo(harness, 'getOldTagKeys', { source: 'influxdb.0' });
+                const room = keys.find(k => k.value === 'room');
+                assert.ok(room, JSON.stringify(keys));
+                assert.match(room.label, /^room \(\d+ value\(s\), \d+ state\(s\)\)$/);
+                assert.ok(keys.some(k => k.value === 'floor'));
+                const values = (await sendTo(harness, 'getOldTagValues', { source: 'influxdb.0', key: 'ROOM' })).map(v => v.value);
+                for (const v of ['kotlownia', 'Kotłownia', 'Garaż']) {
+                    assert.ok(values.includes(v), `${v} in ${values}`);
+                }
+                assert.deepEqual(await sendTo(harness, 'getOldTagValues', { source: 'influxdb.0', key: 'nope' }), []);
+            });
+
+            it('"take over old tags" appends the needed rules with suggestions and keeps existing rows', async function () {
+                this.timeout(20000);
+                const res = await sendTo(harness, 'migrationSuggestRules', { source: 'influxdb.0', rules: RULES, catalog: CATALOG });
+                assert.equal(res.result, 'rulesAdded');
+                const rows = res.native.migrationTagRules;
+                assert.deepEqual(rows[0], RULES[0], 'existing row unchanged');
+                const kot = rows.find(r => r.fromKey === 'room' && r.toValue === 'KOTLOWNIA');
+                assert.ok(kot && kot.fromValue.includes('Kotłownia') && kot.toKey === 'Location', JSON.stringify(rows));
+                assert.ok(rows.some(r => r.fromKey === 'room' && r.fromValue.includes('Garaż') && r.toKey === 'Location' && r.toValue === ''));
+                assert.ok(rows.some(r => r.fromKey === 'floor' && r.fromValue.length === 0 && r.toKey === ''));
+                assert.equal(Number(res.args[0]), rows.length - 1);
+            });
+
+            it('one rule with several old values is applied', async function () {
+                this.timeout(20000);
+                const rules = [...RULES, { fromKey: 'room', fromValue: ['Kotłownia', 'Garaż'], toKey: 'Location', toValue: 'KOTLOWNIA' }, { fromKey: 'floor', fromValue: [], toKey: '-', toValue: '' }];
+                const html = await sendTo(harness, 'migrationPreviewHtml', { source: 'influxdb.0', rules, catalog: CATALOG, ids: Object.values(oldIds) });
+                assert.match(html.text, /Custom tags in the settings of influxdb\.0/);
+                assert.match(html.text, /room=Garaż → Location=KOTLOWNIA \(rule 2\)/);
+                assert.match(html.text, /floor=2 → removed \(rule 3\)/);
+                const res = await sendTo(harness, 'migrationApply', { source: 'influxdb.0', rules, ids: Object.values(oldIds) });
+                assert.match(res.result, /2 state\(s\) configured/);
+                for (const id of Object.values(oldIds)) {
+                    const obj = await harness.objects.getObjectAsync(id);
+                    assert.deepEqual(obj.common.custom['influx-v3.0'].customTags, [{ key: 'Location', value: 'KOTLOWNIA' }], id);
+                }
             });
 
             it('apply writes the translated tags and leaves influxdb.0 untouched', async function () {
