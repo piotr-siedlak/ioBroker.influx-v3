@@ -390,8 +390,9 @@ export class InfluxV3Client {
      * Writes line protocol records.
      *
      * @param lines serialised lines
+     * @param timeoutMs request timeout (default: the client's)
      */
-    async write(lines: string[]): Promise<WriteResult> {
+    async write(lines: string[], timeoutMs?: number): Promise<WriteResult> {
         const text = lines.join('\n');
         let body: Buffer = Buffer.from(text, 'utf8');
         const headers: Record<string, string> = { 'Content-Type': 'text/plain; charset=utf-8' };
@@ -410,7 +411,7 @@ export class InfluxV3Client {
             path = this.path('/api/v3/write_lp', q);
         }
         try {
-            const res = await this.request('POST', path, body, headers);
+            const res = await this.request('POST', path, body, headers, timeoutMs);
             return classifyWrite(res);
         } catch (e) {
             if (e instanceof TransportError) {

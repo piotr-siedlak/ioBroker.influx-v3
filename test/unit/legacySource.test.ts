@@ -1,10 +1,16 @@
 import { strict as assert } from 'node:assert';
 import {
+    buildFluxCount,
+    buildFluxFirstTime,
     buildFluxRead,
+    buildFluxReadMany,
     buildFluxTimeRange,
     buildInfluxQLRead,
+    buildInfluxQLReadMany,
     countTagUses,
+    fluxTablesToPointMap,
     fluxTablesToPoints,
+    influxQLSeriesToPointMap,
     influxQLSeriesToPoints,
     LegacyReadError,
     parseAnnotatedCsv,
@@ -32,6 +38,29 @@ describe('legacy source (InfluxDB 1.x/2.x reader)', () => {
                 'SELECT * FROM "a.0.b" WHERE time >= 1000ms AND time < 2000ms GROUP BY *',
             );
             assert.match(buildInfluxQLRead('a.0.b', 'autogen', 1, 2), /FROM "autogen"\."a\.0\.b" WHERE/);
+        });
+
+        it('reads of many measurements: a list (quoted) or the whole database', () => {
+            assert.equal(
+                buildInfluxQLReadMany(['a.0.b', 'BUFOR-TOP'], '', 1000, 2000),
+                'SELECT * FROM "a.0.b" WHERE time >= 1000ms AND time < 2000ms GROUP BY *; SELECT * FROM "BUFOR-TOP" WHERE time >= 1000ms AND time < 2000ms GROUP BY *',
+            );
+            assert.match(buildInfluxQLReadMany(['x'], 'autogen', 1, 2), /FROM "autogen"\."x" WHERE/);
+            const q = buildFluxReadMany('iobroker', ['a', 'b"x'], 0, 1000);
+            assert.match(q, /filter\(fn: \(r\) => r\._measurement == "a" or r\._measurement == "b\\"x"\)/);
+            assert.match(q, /pivot\(rowKey: \["_time"\]/);
+            assert.doesNotMatch(buildFluxReadMany('iobroker', 'all', 0, 1000), /_measurement ==/);
+            assert.match(
+                buildFluxCount('iobroker', ['a'], 0, 1000),
+                /r\._measurement == "a"\)\n {2}\|> filter\(fn: \(r\) => r\._field == "value"\)\n {2}\|> count\(\) \|> group\(\) \|> sum\(\)$/,
+            );
+            const f = buildFluxFirstTime('iobroker', ['a']);
+            assert.match(f, /r\._measurement == "a"/);
+            assert.match(f, /r\._field == "value"/);
+            assert.match(
+                f,
+                /first\(\) \|> keep\(columns: \["_time"\]\) \|> group\(\) \|> sort\(columns: \["_time"\]\) \|> limit\(n: 1\)/,
+            );
         });
 
         it('Flux read: range, measurement filter and pivot', () => {
@@ -129,6 +158,22 @@ describe('legacy source (InfluxDB 1.x/2.x reader)', () => {
             assert.equal(points[0].from, undefined);
         });
 
+        it('groups series of several measurements by name', () => {
+            const map = influxQLSeriesToPointMap([
+                { name: 'b', columns: ['time', 'value'], values: [[2, 1]] },
+                { name: 'a', tags: { room: 'x' }, columns: ['time', 'value'], values: [[5, 1]] },
+                { name: 'a', tags: { room: 'y' }, columns: ['time', 'value'], values: [[3, 2]] },
+            ]);
+            assert.deepEqual(
+                map.get('a')?.map(p => [p.ts, p.tags.room]),
+                [
+                    [3, 'y'],
+                    [5, 'x'],
+                ],
+            );
+            assert.equal(map.get('b')?.length, 1);
+        });
+
         it('reports statement errors and invalid answers', () => {
             assert.throws(
                 () => parseInfluxQLResponse('{"results":[{"statement_id":0,"error":"database not found: x"}]}'),
@@ -193,6 +238,22 @@ describe('legacy source (InfluxDB 1.x/2.x reader)', () => {
                 from: 'admin.0',
                 tags: {},
             });
+        });
+
+        it('groups the points of several measurements', () => {
+            const map = fluxTablesToPointMap(parseAnnotatedCsv(csv));
+            assert.deepEqual([...map.keys()], ['a.0.b']);
+            assert.equal(map.get('a.0.b')?.length, 3);
+            const many = fluxTablesToPointMap(
+                parseAnnotatedCsv(csv.replace(/,a\.0\.b,true,admin/, ',other,true,admin')),
+            );
+            assert.deepEqual(
+                [...many.entries()].map(([m, p]) => [m, p.length]),
+                [
+                    ['a.0.b', 2],
+                    ['other', 1],
+                ],
+            );
         });
 
         it('throws on error tables and accepts empty answers', () => {

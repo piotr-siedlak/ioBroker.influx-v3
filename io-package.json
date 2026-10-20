@@ -211,7 +211,8 @@
         "dmTo": "",
         "dmUntilFirstV3": true,
         "dmKeepOldTags": true,
-        "dmBatchSize": 5000,
+        "dmBatchLines": 50000,
+        "dmParallelWrites": 2,
         "dmPauseMs": 0
     },
     "objects": [],

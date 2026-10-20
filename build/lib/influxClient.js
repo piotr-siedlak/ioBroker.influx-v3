@@ -325,8 +325,9 @@ class InfluxV3Client {
      * Writes line protocol records.
      *
      * @param lines serialised lines
+     * @param timeoutMs request timeout (default: the client's)
      */
-    async write(lines) {
+    async write(lines, timeoutMs) {
         const text = lines.join('\n');
         let body = Buffer.from(text, 'utf8');
         const headers = { 'Content-Type': 'text/plain; charset=utf-8' };
@@ -346,7 +347,7 @@ class InfluxV3Client {
             path = this.path('/api/v3/write_lp', q);
         }
         try {
-            const res = await this.request('POST', path, body, headers);
+            const res = await this.request('POST', path, body, headers, timeoutMs);
             return classifyWrite(res);
         }
         catch (e) {

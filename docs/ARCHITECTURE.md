@@ -34,8 +34,9 @@ ioBroker ───────────────────────�
 | `Migration` (`lib/migration.ts`) | explicit, previewable copy of `influxdb.N` per-state settings into `influx-v3.N`; custom tags translated by the tag rules | pure mapping + I/O on user request |
 | `TagMapping` (`lib/tagMapping.ts`) | tag rules (old key/value → catalog key/value, remove), catalog spelling, conflicts — shared by both migrations (ADR-0006) | yes |
 | `TagStandard` (`lib/tagStandard.ts`) | proposal of a standard for the old tags: key/value synonym dictionaries, folding, value spelling, catalog extension and minimal rules (only a proposal for the user, never used at runtime) | yes |
-| `LegacySource` (`lib/legacySource.ts`) | read-only readers for the old databases: InfluxDB 1.x (InfluxQL `GROUP BY *`), InfluxDB 2.x (Flux `pivot`, annotated CSV); quoting of identifiers/strings | pure parsers + I/O |
-| `DataMigration` (`lib/dataMigration.ts`) | import job: adaptive time windows, batch writes with retry, live-queue priority, checkpoint/resume, progress, dry-run preview; source/target/store/clock injected | yes (fakes) |
+| `LegacySource` (`lib/legacySource.ts`) | read-only readers for the old databases: InfluxDB 1.x (InfluxQL `GROUP BY *`, one statement per measurement), InfluxDB 2.x (Flux `pivot`, annotated CSV); one time window of many measurements per request, oldest point; quoting of identifiers/strings | pure parsers + I/O |
+| `DataMigration` (`lib/dataMigration.ts`) | import job: one pass over the time axis for all states (adaptive windows, read-ahead), batch writes with adaptive size, patient retries, live-queue priority, checkpoint/resume, progress with rate/ETA, dry-run preview; never queries InfluxDB 3; source/target/store/clock injected | yes (fakes) |
+| `LiveStartStore` (`lib/liveStart.ts`) | first live value queued per state (`live-start.json`) – where the import of a state ends | yes |
 | `redact` (`lib/redact.ts`) | removes tokens/authorization headers from any text that may be logged or returned | yes |
 
 ## Data flow of one state change

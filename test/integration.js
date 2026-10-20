@@ -448,96 +448,105 @@ tests.integration(path.join(__dirname, '..'), {
             });
         });
 
+        // shared by the migration suite and the suite that checks the continuation after a restart
+        const IMPORT_DB = 'iobimport';
+        const M = `${BASE}.mig`;
+        const ids = { temp: `${M}.temp`, aliased: `${M}.aliased`, sw: `${M}.switch` };
+        const OLD_ALIAS = `${M}.old_alias`;
+        // logged by influxdb.0 only (settings migration not applied): imported with the mapping "Apply" would give it
+        const notYet = `${M}.not_yet`;
+        const NOT_YET_ALIAS = `${M}.NOT-YET`;
+        // outside of `${M}.*`, so the import test below does not select them
+        const O = `${BASE}.oldtags`;
+        const oldIds = { kot: `${O}.kot`, garage: `${O}.garage` };
+        // configured for this instance only, with a tag from before the tag catalog (ignored at runtime)
+        const ownId = `${O}.own`;
+        const RULES = [{ fromKey: 'room', fromValue: '', toKey: 'Location', toValue: '' }];
+        const T = Date.UTC(2024, 0, 1);
+
+        function seedOld() {
+            const lines = [];
+            for (let i = 0; i < 48; i++) {
+                lines.push(`${ids.temp},room=salon value=${20 + i / 10},ack=true,from="system.adapter.js.0",q=0 ${T + i * 3600000}`);
+                lines.push(`${OLD_ALIAS},room=Salon value=${i},ack=true,from="system.adapter.js.0",q=0 ${T + i * 3600000}`);
+            }
+            lines.push(`${ids.sw} value=true,ack=false,from="admin.0",q=0 ${T}`);
+            lines.push(`${NOT_YET_ALIAS} value=1,ack=true,from="admin.0",q=0 ${T}`);
+            lines.push(`${ids.sw} value=false,ack=true,from="admin.0",q=0 ${T + 60000}`);
+            const u = new globalThis.URL(`${V2.INFLUX2_URL}/api/v2/write?org=${V2.INFLUX2_ORG}&bucket=${V2.INFLUX2_BUCKET}&precision=ms`);
+            return new Promise((resolve, reject) => {
+                const req = http.request(
+                    { hostname: u.hostname, port: u.port, path: `${u.pathname}${u.search}`, method: 'POST', headers: { Authorization: `Token ${V2.INFLUX2_TOKEN}` } },
+                    res => {
+                        res.resume();
+                        res.on('end', () => (res.statusCode === 204 ? resolve() : reject(new Error(`seed: HTTP ${res.statusCode}`))));
+                    },
+                );
+                req.on('error', reject);
+                req.end(lines.join('\n'));
+            });
+        }
+
+        /** objects of the old adapter, seeded old database and instance settings of the migration suites */
+        async function prepareMigration(harness) {
+            const classic = extra => ({ 'influxdb.0': { enabled: true, changesOnly: true, debounceTime: 0, ...extra } });
+            await harness.objects.setObjectAsync(
+                ids.temp,
+                stateObject('number', classic({ customTags: [{ name: 'room', value: 'kotlownia' }, { name: 'floor', value: '1' }] })),
+            );
+            await harness.objects.setObjectAsync(ids.aliased, stateObject('number', classic({ aliasId: OLD_ALIAS })));
+            await harness.objects.setObjectAsync(ids.sw, stateObject('boolean', classic({})));
+            await harness.objects.setObjectAsync(notYet, stateObject('number', classic({ aliasId: NOT_YET_ALIAS })));
+            await harness.objects.setObjectAsync('system.adapter.influxdb.0', {
+                type: 'instance',
+                common: { name: 'influxdb', enabled: false, mode: 'daemon', host: 'none' },
+                native: { dbversion: '2.x', host: 'localhost', port: 8086, protocol: 'http', dbname: 'iobroker' },
+            });
+            await harness.objects.setObjectAsync(oldIds.kot, stateObject('number', classic({ customTags: [{ name: 'room', value: 'Kotłownia' }] })));
+            await harness.objects.setObjectAsync(
+                ownId,
+                stateObject('number', { 'influx-v3.0': { enabled: true, customTags: [{ key: 'room', value: 'kotlownia' }] } }),
+            );
+            await harness.objects.setObjectAsync(
+                oldIds.garage,
+                stateObject('number', classic({ customTags: [{ name: 'room', value: 'Garaż' }, { name: 'floor', value: '2' }] })),
+            );
+            if (V2) {
+                await seedOld();
+            }
+            await harness.changeAdapterConfig('influx-v3', {
+                native: {
+                    url: URL,
+                    token: TOKEN,
+                    database: IMPORT_DB,
+                    flushIntervalMs: 200,
+                    tagDefinitions: CATALOG,
+                    migrationTagRules: RULES,
+                    storeOnStart: false,
+                    ...(V2
+                        ? {
+                              dmVersion: '2.x',
+                              dmUrl: V2.INFLUX2_URL,
+                              dmOrg: V2.INFLUX2_ORG,
+                              dmBucket: V2.INFLUX2_BUCKET,
+                              dmToken: V2.INFLUX2_TOKEN,
+                              dmStates: `${M}.*`,
+                              dmInfluxdbInstance: 'influxdb.0',
+                              // slower windows, so that the restart test hits a running import (not part of the job identity)
+                              dmPauseMs: 300,
+                          }
+                        : {}),
+                },
+            });
+        }
+
         (URL ? suite : () => undefined)('Migration with tag rules and import of historical data', getHarness => {
             let harness;
-            const IMPORT_DB = 'iobimport';
-            const M = `${BASE}.mig`;
-            const ids = { temp: `${M}.temp`, aliased: `${M}.aliased`, sw: `${M}.switch` };
-            const OLD_ALIAS = `${M}.old_alias`;
-            // logged by influxdb.0 only (settings migration not applied): imported with the mapping "Apply" would give it
-            const notYet = `${M}.not_yet`;
-            const NOT_YET_ALIAS = `${M}.NOT-YET`;
-            // outside of `${M}.*`, so the import test below does not select them
-            const O = `${BASE}.oldtags`;
-            const oldIds = { kot: `${O}.kot`, garage: `${O}.garage` };
-            // configured for this instance only, with a tag from before the tag catalog (ignored at runtime)
-            const ownId = `${O}.own`;
-            const RULES = [{ fromKey: 'room', fromValue: '', toKey: 'Location', toValue: '' }];
-            const T = Date.UTC(2024, 0, 1);
-
-            function seedOld() {
-                const lines = [];
-                for (let i = 0; i < 48; i++) {
-                    lines.push(`${ids.temp},room=salon value=${20 + i / 10},ack=true,from="system.adapter.js.0",q=0 ${T + i * 3600000}`);
-                    lines.push(`${OLD_ALIAS},room=Salon value=${i},ack=true,from="system.adapter.js.0",q=0 ${T + i * 3600000}`);
-                }
-                lines.push(`${ids.sw} value=true,ack=false,from="admin.0",q=0 ${T}`);
-                lines.push(`${NOT_YET_ALIAS} value=1,ack=true,from="admin.0",q=0 ${T}`);
-                lines.push(`${ids.sw} value=false,ack=true,from="admin.0",q=0 ${T + 60000}`);
-                const u = new globalThis.URL(`${V2.INFLUX2_URL}/api/v2/write?org=${V2.INFLUX2_ORG}&bucket=${V2.INFLUX2_BUCKET}&precision=ms`);
-                return new Promise((resolve, reject) => {
-                    const req = http.request(
-                        { hostname: u.hostname, port: u.port, path: `${u.pathname}${u.search}`, method: 'POST', headers: { Authorization: `Token ${V2.INFLUX2_TOKEN}` } },
-                        res => {
-                            res.resume();
-                            res.on('end', () => (res.statusCode === 204 ? resolve() : reject(new Error(`seed: HTTP ${res.statusCode}`))));
-                        },
-                    );
-                    req.on('error', reject);
-                    req.end(lines.join('\n'));
-                });
-            }
 
             before(async function () {
                 this.timeout(120000);
                 harness = getHarness();
-                const classic = extra => ({ 'influxdb.0': { enabled: true, changesOnly: true, debounceTime: 0, ...extra } });
-                await harness.objects.setObjectAsync(
-                    ids.temp,
-                    stateObject('number', classic({ customTags: [{ name: 'room', value: 'kotlownia' }, { name: 'floor', value: '1' }] })),
-                );
-                await harness.objects.setObjectAsync(ids.aliased, stateObject('number', classic({ aliasId: OLD_ALIAS })));
-                await harness.objects.setObjectAsync(ids.sw, stateObject('boolean', classic({})));
-                await harness.objects.setObjectAsync(notYet, stateObject('number', classic({ aliasId: NOT_YET_ALIAS })));
-                await harness.objects.setObjectAsync('system.adapter.influxdb.0', {
-                    type: 'instance',
-                    common: { name: 'influxdb', enabled: false, mode: 'daemon', host: 'none' },
-                    native: { dbversion: '2.x', host: 'localhost', port: 8086, protocol: 'http', dbname: 'iobroker' },
-                });
-                await harness.objects.setObjectAsync(oldIds.kot, stateObject('number', classic({ customTags: [{ name: 'room', value: 'Kotłownia' }] })));
-                await harness.objects.setObjectAsync(
-                    ownId,
-                    stateObject('number', { 'influx-v3.0': { enabled: true, customTags: [{ key: 'room', value: 'kotlownia' }] } }),
-                );
-                await harness.objects.setObjectAsync(
-                    oldIds.garage,
-                    stateObject('number', classic({ customTags: [{ name: 'room', value: 'Garaż' }, { name: 'floor', value: '2' }] })),
-                );
-                if (V2) {
-                    await seedOld();
-                }
-                await harness.changeAdapterConfig('influx-v3', {
-                    native: {
-                        url: URL,
-                        token: TOKEN,
-                        database: IMPORT_DB,
-                        flushIntervalMs: 200,
-                        tagDefinitions: CATALOG,
-                        migrationTagRules: RULES,
-                        storeOnStart: false,
-                        ...(V2
-                            ? {
-                                  dmVersion: '2.x',
-                                  dmUrl: V2.INFLUX2_URL,
-                                  dmOrg: V2.INFLUX2_ORG,
-                                  dmBucket: V2.INFLUX2_BUCKET,
-                                  dmToken: V2.INFLUX2_TOKEN,
-                                  dmStates: `${M}.*`,
-                                  dmInfluxdbInstance: 'influxdb.0',
-                              }
-                            : {}),
-                    },
-                });
+                await prepareMigration(harness);
                 await harness.startAdapterAndWait();
                 await waitFor(async () => (await harness.states.getStateAsync('influx-v3.0.info.connection'))?.val === true, 30000);
             });
@@ -748,6 +757,10 @@ tests.integration(path.join(__dirname, '..'), {
                     }, 90000);
                 const status = await finished();
                 assert.match(status, /^finished: 99 point\(s\) imported for 4 state\(s\)/);
+                assert.ok(
+                    harness.getLogs().some(l => /Data import: 4 state\(s\), 2024-01-01 00:00 … .* UTC, about 99 point\(s\), read in time slices/.test(l.message)),
+                    'planned once for all states',
+                );
                 assert.equal((await harness.states.getStateAsync('influx-v3.0.info.dataMigration.progress')).val, 100);
 
                 const q = query => sql(query, IMPORT_DB);
@@ -767,7 +780,7 @@ tests.integration(path.join(__dirname, '..'), {
                 assert.match(again.error, /already finished/);
 
                 // settings migration applied afterwards: live logging starts, a new import ends at the first live value
-                // found after the range imported before (SQL with a lower time bound)
+                // the adapter recorded for the state (InfluxDB 3 is not queried)
                 await sendTo(harness, 'migrationApply', { source: 'influxdb.0', rules: RULES, ids: [notYet] });
                 await waitFor(async () => (await sendTo(harness, 'getEnabledDPs', {}))[notYet]);
                 await harness.states.setStateAsync(notYet, { val: 5, ack: true });
@@ -780,6 +793,44 @@ tests.integration(path.join(__dirname, '..'), {
                 const after = await q(`SELECT COUNT(*) AS n, MAX(value) AS v FROM numeric_states WHERE state_id = '${NOT_YET_ALIAS}'`);
                 assert.deepEqual([Number(after[0].n), after[0].v], [2, 5], 'old point written again (same time), live value kept');
                 assert.ok(!harness.getLogs().some(l => l.message.includes(V2.INFLUX2_TOKEN)), 'token never logged');
+            });
+
+            (V2 ? it : it.skip)('an import interrupted by a restart of the adapter is paused (continued by the next suite)', async function () {
+                this.timeout(60000);
+                const status = async () => (await harness.states.getStateAsync('influx-v3.0.info.dataMigration.status'))?.val || '';
+                assert.match((await sendTo(harness, 'dmReset', {})).result, /Progress reset/);
+                assert.match((await sendTo(harness, 'dmStart', {})).result, /Import of 4 state\(s\) started/);
+                await waitFor(async () => / UTC · \d+ of about 99 point/.test(await status()), 30000);
+                await harness.stopAdapter();
+                assert.match(await status(), /^paused - continues after the restart at /);
+            });
+        });
+
+        // the instance data directory (checkpoint) survives between suites, the objects are prepared again
+        (URL && V2 ? suite : () => undefined)('An interrupted import continues after the restart by itself', getHarness => {
+            let harness;
+
+            before(async function () {
+                this.timeout(120000);
+                harness = getHarness();
+                await prepareMigration(harness);
+                await harness.startAdapterAndWait();
+            });
+
+            after(async function () {
+                this.timeout(30000);
+                await harness?.stopAdapter();
+            });
+
+            it('continues without "Start" and finishes', async function () {
+                this.timeout(150000);
+                const end = await waitFor(async () => {
+                    const st = (await harness.states.getStateAsync('influx-v3.0.info.dataMigration.status'))?.val || '';
+                    return /^(finished|failed)/.test(st) ? st : null;
+                }, 140000);
+                assert.match(end, /^finished: \d+ point\(s\) imported for 4 state\(s\)/);
+                assert.ok(harness.getLogs().some(l => /Data import started by the restart of the adapter/.test(l.message)));
+                assert.ok(harness.getLogs().some(l => /Data import: resuming at 20\d\d-/.test(l.message)));
             });
         });
     },

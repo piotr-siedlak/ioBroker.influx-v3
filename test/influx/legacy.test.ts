@@ -192,6 +192,27 @@ describe('import of historical data with real InfluxDB 1.x / 2.x servers', funct
             }
         });
 
+        it('reads a time window of several measurements at once and finds the oldest point', async () => {
+            const r = createLegacyReader(v1Config());
+            try {
+                const map = await r.readMany([`${RUN}.temp`, `${RUN}.switch`, `${RUN}.missing`], T0, T0 + 2 * HOUR);
+                assert.deepEqual([...map.entries()].map(([m, p]) => [m, p.length]).sort(), [
+                    [`${RUN}.switch`, 1],
+                    [`${RUN}.temp`, 2],
+                ]);
+                assert.equal(map.get(`${RUN}.temp`)?.[1].tags.room, 'kotlownia');
+                const all = await r.readMany('all', T0, T0 + 2 * HOUR);
+                assert.equal(all.get(`${RUN}.temp`)?.length, 2);
+                assert.equal(await r.firstTime([`${RUN}.switch`]), T0 + HOUR);
+                assert.equal(await r.firstTime([`${RUN}.switch`, `${RUN}.temp`]), T0);
+                assert.equal(await r.firstTime([`${RUN}.missing`]), undefined);
+                assert.equal(await r.countPoints([`${RUN}.temp`, `${RUN}.switch`], T0, T0 + 10 * HOUR), 11);
+                assert.equal(await r.countPoints([`${RUN}.missing`], T0, T0 + DAY), 0);
+            } finally {
+                r.close();
+            }
+        });
+
         it('lists the tags stored in the points with the number of measurements', async () => {
             const r = createLegacyReader(v1Config());
             try {
@@ -234,6 +255,10 @@ describe('import of historical data with real InfluxDB 1.x / 2.x servers', funct
                 // "use tags" variant of the classic adapter: ack/q/from as tags
                 classicLines(`${RUN}.tagged`, hourly(5), {}, true),
                 classicLines(`${RUN}.text`, [{ ts: T0, value: 'line\nbreak, comma "quote"' }], {}),
+                // many states: more than one query group (100 measurements per query)
+                ...Array.from({ length: 150 }, (_, i) =>
+                    classicLines(`${RUN}.many${i}`, hourly(3, T0 + i * 60_000), { room: 'Salon' }),
+                ),
             ].join('\n');
             const status = await post(
                 `${env.INFLUX2_URL}/api/v2/write?org=${env.INFLUX2_ORG}&bucket=${env.INFLUX2_BUCKET}&precision=ms`,
@@ -267,6 +292,34 @@ describe('import of historical data with real InfluxDB 1.x / 2.x servers', funct
                 );
                 const text = await r.read(`${RUN}.text`, T0, T0 + 1);
                 assert.equal(text[0].value, 'line\nbreak, comma "quote"');
+            } finally {
+                r.close();
+            }
+        });
+
+        it('reads a time window of many measurements (several query groups) and finds the oldest point', async () => {
+            const r = createLegacyReader(v2Config());
+            try {
+                const names = Array.from({ length: 150 }, (_, i) => `${RUN}.many${i}`);
+                const map = await r.readMany([...names, `${RUN}.tagged`], T0, T0 + DAY);
+                assert.equal(map.size, 151);
+                assert.ok(names.every(n => map.get(n)?.length === 3));
+                assert.deepEqual(map.get(`${RUN}.many7`)?.[0], {
+                    ts: T0 + 7 * 60_000,
+                    value: 0.5,
+                    ack: true,
+                    q: 0,
+                    from: 'system.adapter.js.0',
+                    tags: { room: 'Salon' },
+                });
+                assert.equal(map.get(`${RUN}.tagged`)?.[0].from, 'system.adapter.js.0', 'meta tags');
+                const all = await r.readMany('all', T0, T0 + HOUR);
+                assert.ok(all.has(`${RUN}.many59`) && !all.has(`${RUN}.many60`) && all.has(`${RUN}.temp`));
+                assert.equal(await r.firstTime([`${RUN}.many9`, `${RUN}.many5`]), T0 + 5 * 60_000);
+                assert.equal(await r.firstTime([...names.slice(120), `${RUN}.temp`]), T0);
+                assert.equal(await r.firstTime([`${RUN}.missing`]), undefined);
+                assert.equal(await r.countPoints([...names, `${RUN}.tagged`], T0, T0 + DAY), 455, 'two query groups');
+                assert.equal(await r.countPoints([`${RUN}.temp`], T0, T0 + 10 * HOUR), 10);
             } finally {
                 r.close();
             }
@@ -370,7 +423,6 @@ describe('import of historical data with real InfluxDB 1.x / 2.x servers', funct
                 {
                     source,
                     target: {
-                        firstTime: () => Promise.resolve(undefined),
                         write: lines => v3.write(lines),
                         busy: () => false,
                     },
@@ -384,12 +436,14 @@ describe('import of historical data with real InfluxDB 1.x / 2.x servers', funct
                             ctrl.abort();
                         }
                     },
+                    liveStart: () => undefined,
                 },
                 {
                     stateFilter: '',
                     untilFirstV3: true,
                     keepOldTags: true,
                     batchSize: 50,
+                    parallelWrites: 2,
                     pauseMs: 0,
                     influxdbInstance: '',
                 },
@@ -423,6 +477,21 @@ describe('import of historical data with real InfluxDB 1.x / 2.x servers', funct
             const all = await count(id);
             assert.equal(all.n, 200, 'every point exactly once');
             assert.equal(all.loc, 'KOTLOWNIA', 'room=kotlownia → Location=KOTLOWNIA');
+        });
+
+        it('InfluxDB 2.x → 3: 150 states in one pass over the time axis', async function () {
+            if (!HAS_V2) {
+                this.skip();
+            }
+            const store = new MemStore();
+            const items = Array.from({ length: 150 }, (_, i) => item(`iob.${RUN}.many${i}`, `${RUN}.many${i}`));
+            assert.equal(await runImport(v2Config(), items, store), 'finished');
+            assert.equal(store.cp?.totals.points, 450);
+            const rows = await v3.querySql<{ n: number; s: number }>(
+                'SELECT COUNT(*) AS n, COUNT(DISTINCT state_id) AS s FROM numeric_states WHERE state_id LIKE $p',
+                { p: `iob.${RUN}.many%` },
+            );
+            assert.deepEqual([Number(rows[0].n), Number(rows[0].s)], [450, 150]);
         });
 
         it('InfluxDB 2.x → 3: both metadata layouts', async function () {

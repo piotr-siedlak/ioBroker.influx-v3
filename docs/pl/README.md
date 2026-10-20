@@ -299,13 +299,14 @@ w starych punktach podczas importu danych.
    organizacja, użytkownik). Wpisz hasło (1.x) albo token do odczytu (2.x) – nie da się ich odczytać z innego
    adaptera. Są przechowywane w postaci zaszyfrowanej i nigdy nie trafiają do logów. **Zapisz.**
 2. Opcjonalnie: ogranicz stany (`hm-rpc.0.*, javascript.0.*`) i okres.
-3. *Testuj połączenie*, potem *Podgląd (próba bez zapisu)*: dla każdego stanu stary pomiar (alias z ustawień
-   `influxdb.N`, w przeciwnym razie identyfikator), stary i importowany okres, tabela docelowa oraz pierwsze
-   przekonwertowane rekordy; stare pomiary, które nie zostaną zaimportowane, są wymienione z przyczyną (filtr stanów,
-   inna instancja influxdb, konflikt, brak stanu). Nic nie jest zapisywane.
-4. *Start / kontynuuj*. Postęp, zaimportowane i odrzucone punkty widać na żywo (`info.dataMigration.*`).
-   *Stop* albo restart adaptera zachowuje postęp – *Start* kontynuuje od miejsca zatrzymania. *Resetuj postęp*
-   powoduje, że następny import zacznie się od początku.
+3. *Testuj połączenie*, potem *Podgląd (próba bez zapisu)*: okres, który zostanie zaimportowany, ile stanów kończy
+   się na znanej pierwszej wartości bieżącej, a dla pierwszych stanów stary pomiar (alias z ustawień `influxdb.N`,
+   w przeciwnym razie identyfikator), tabela docelowa i przekonwertowane rekordy z ostatniej godziny; stare pomiary,
+   które nie zostaną zaimportowane, są wymienione z przyczyną (filtr stanów, inna instancja influxdb, konflikt, brak
+   stanu). Nic nie jest zapisywane.
+4. *Start / kontynuuj*. Postęp (osiągnięta data, punkty, punkty/s, szacowany pozostały czas), zaimportowane
+   i odrzucone punkty widać na żywo (`info.dataMigration.*`). *Stop* albo restart adaptera zachowuje postęp – *Start*
+   kontynuuje od miejsca zatrzymania. *Resetuj postęp* powoduje, że następny import zacznie się od początku.
 
 Które stany: skonfigurowane dla tej instancji **oraz** te, które zapisuje tylko `influxdb.N`. Te drugie są importowane
 z tabelą i tagami, które nadałoby im *Zastosuj* w *Migracji ustawień* (te same reguły, zapisany katalog) – żadne
@@ -313,16 +314,30 @@ ustawienie nie jest zmieniane. Najlepsza kolejność: najpierw zastosuj migracj�
 stan kończy się dokładnie na swojej pierwszej wartości bieżącej. Jeśli zastosujesz ją po imporcie, okres pomiędzy
 uzupełnisz ponownym importem (*Resetuj postęp* → *Start*).
 
+Jak działa import (z myślą o wielu stanach i latach danych): przechodzi po osi czasu **raz** – każde okno czasowe
+jest czytane dla wszystkich stanów jednym zapytaniem (adaptacyjnie: 1 minuta … 30 dni, ok. 40 000–100 000 punktów na
+okno), a następne okno jest czytane, gdy bieżące jest zapisywane. Podczas importu InfluxDB 3 nie jest odpytywany, więc
+jego rozmiar nie spowalnia importu. Zapisy idą dużymi żądaniami (domyślnie 50 000 punktów), po dwa naraz – InfluxDB 3
+odpowiada na każdy zapis dopiero po zapisaniu dziennika WAL (mniej więcej raz na sekundę), więc o szybkości decyduje
+rozmiar żądania, a nie ich liczba. Zbyt duże lub zbyt wolne odpowiedzi zmniejszają okno; przekroczenie czasu zapisu
+zmniejsza żądania o połowę. Gdy któryś serwer jest niedostępny (np. restart), import czeka tak długo, jak trzeba,
+i sam kontynuuje; po restarcie adaptera też kontynuuje sam (*Stop* kończy go do następnego *Start*). Przed startem
+punkty są liczone, więc postęp pokazuje „z ok. N punktów” i pozostały czas.
+
 Jak zapisywane są punkty: dokładnie tak jak dzisiejsze wartości bieżące stanu (tabela, tagi z katalogu, metadane,
 zaokrąglanie, typ wartości; wartości, których nie da się przekonwertować, są liczone i pomijane). Domyślnie każdy stan
-jest importowany tylko do pierwszej wartości, którą influx-v3 już dla niego zapisał, więc historia i dane bieżące się
-nie nakładają; ponowny zapis tego samego punktu tylko go nadpisuje. Import zapisuje bezpośrednio (nie przez bufor
-bieżących danych) i czeka, gdy bufor bieżących danych się zapełnia.
+kończy się na pierwszej wartości bieżącej, którą ta instancja dla niego zapisała – adapter zapamiętuje ten czas
+w swoim katalogu danych (`live-start.json`). Stany bez takiego wpisu kończą się w chwili startu importu; punkty
+zapisane przez oba adaptery mają ten sam znacznik czasu, więc po prostu się nadpisują. Import zapisuje bezpośrednio
+(nie przez bufor bieżących danych) i czeka, gdy bufor bieżących danych się zapełnia.
 
 Ograniczenia: dynamiczne tagi `{state:…}` nie są odtwarzane dla przeszłości. InfluxDB 3 Core nie potrafi usuwać
 pojedynczych punktów – sprawdź podgląd przed *Start*; drugi import z innymi regułami tagów tworzy dodatkowe serie (aby
-go powtórzyć, usuń tabelę). Core jest zoptymalizowany pod najnowsze dane: zapytania obejmujące wiele zaimportowanych
-lat mogą trafić na limit serwera `--query-file-limit` (zwiększ go albo pytaj o krótsze okresy).
+go powtórzyć, usuń tabelę). **InfluxDB 3 Core i długie okresy**: Core zapisuje jeden plik Parquet na tabelę
+i 10 minut i nigdy ich nie łączy; jedno zapytanie może odczytać najwyżej `--query-file-limit` plików (domyślnie
+432 ≈ 3 dni). Aby odpytywać tygodnie lub lata zaimportowanej historii (np. w Grafanie), uruchom Core z wyższym
+`--query-file-limit` (więcej pamięci na zapytanie) albo użyj InfluxDB 3 Enterprise, którego kompakcja łączy stare
+pliki (darmowa licencja do użytku domowego).
 
 ## Rozwiązywanie problemów
 
@@ -336,6 +351,8 @@ lat mogą trafić na limit serwera `--query-file-limit` (zwiększ go albo pytaj 
 | pusta historia po zmianie tabeli/trybu | stare dane zostają w starej tabeli – odczytaj je bezpośrednio przez SQL |
 | za reverse proxy | dodaj prefiks ścieżki do URL (`https://host/influx`) |
 | proxy HTTP | nieobsługiwane w 0.1.0 |
+| „Query would scan … Parquet files, exceeding the file limit” | InfluxDB 3 Core: zapytanie obejmuje więcej niż ok. 3 dni – zapytaj o krótszy okres, zwiększ `--query-file-limit` albo użyj Enterprise (zob. *Migracja danych* → Ograniczenia). Sam import już nie odpytuje InfluxDB 3 |
+| import zatrzymał się z „timeout after 10000 ms” (wersje sprzed importu w przekrojach czasowych) | zaktualizuj; import nie pyta już InfluxDB 3 o pierwszą wartość każdego stanu |
 | Tabela reguł z wieloma wierszami: *Stare wartości* ładują się wolno | używane tagi są odczytywane raz i współdzielone przez wszystkie komórki (stara baza: pamięć podręczna 10 min, komórka czeka na nią najwyżej 2 s); pierwsze otwarcie po starcie może pokazać tylko wartości z ustawień – otwórz zakładkę ponownie po chwili |
 
 ## Rozwój i testy
@@ -350,6 +367,7 @@ eval "$(scripts/legacy-influx-test-server.sh start)"  # InfluxDB 1.8 + 2.7 jako 
 npm run test:influx                                # testy z prawdziwymi serwerami (awaria/replay, kill -9, import 1.x/2.x → 3)
 npm run test:integration                           # js-controller (cykl życia; end-to-end przy ustawionych INFLUX3_*)
 npx tsx scripts/loadtest.ts 100,1000,10000 20      # test obciążenia
+npx tsx scripts/import-loadtest.ts 548 3 300       # test importu historii (opis w nagłówku skryptu)
 scripts/influx3-test-server.sh stop && scripts/legacy-influx-test-server.sh stop
 ```
 

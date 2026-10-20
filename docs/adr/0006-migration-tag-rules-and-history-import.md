@@ -271,3 +271,59 @@ Decision:
 4. **Preview and messages**: the preview counts configured and not yet configured states, marks the latter, recommends
    applying the settings migration first (then each state ends exactly at its first live value) and groups the old
    measurements that are still not imported by reason (state filter, other influxdb instance, conflict, no state).
+
+## Extension 7 (2026-10-20): time-sliced import for large histories
+
+Reported: the import of 548 states (one year in InfluxDB 2.x, InfluxDB 3 Core 3.12.1) stopped at 1.6 % with "timeout
+after 10000 ms"; after a restart every *Start* and the *Preview* failed at once with "Query would scan 432 Parquet
+files, exceeding the file limit". The log of the user's system showed the cause:
+
+* **A full-table scan per state**: before each state the job asked InfluxDB 3 for the first stored value
+  (`SELECT MIN(time) … WHERE state_id = $id`, no time bound). Every imported state adds Parquet files to the same
+  table, so the query became slower with each state until it hit the 10 s request timeout or Core's
+  `--query-file-limit` (default 432 files ≈ 3 days at the default 10-minute `gen1` blocks). The preview ran the
+  same query.
+* **State after state**: each state was written over its whole year before the next one. Core persists one file per
+  table and 10-minute block *per snapshot*, and never compacts – so every block got roughly one file per state, and
+  even short queries over imported periods could exceed the file limit.
+* **One read loop per state**: 548 × (adaptive windows from one day) small queries against the old database.
+* **Fragile on errors**: a timeout ended the job; ten write retries did not survive a restart of InfluxDB 3.
+
+Decision:
+
+1. **Time slices instead of states**: the job walks the time axis once, from the oldest selected old point to the end.
+   Each window is read for *all* selected measurements with one query (the whole bucket/database when the selection
+   covers most of it, else in groups of up to 100 measurements), converted per state and written together. Each
+   10-minute block of InfluxDB 3 is therefore written once, like live data. The window adapts to the number of rows
+   (aim 40 000–100 000 rows, 1 minute … 30 days); a too large or timed-out answer shrinks it. The next window is read
+   while the current one is written; query groups are read two at a time. InfluxDB 1.x gets one statement per
+   measurement (in one request), because one statement over several measurements gives a field one type for all of
+   them (the boolean `value` of a switch would be empty next to a sensor's numbers).
+2. **No queries against InfluxDB 3**: the adapter records the time of the first live value it queues per state in
+   `<instance data dir>/live-start.json` (kept forever, saved within seconds). A state is imported up to that time;
+   states without an entry (not logged yet, or logged by an older version) up to the start of the job. Overlapping
+   points are harmless: the classic adapter and this adapter store the same state timestamp, so equal points
+   overwrite each other. Live-start times found by older versions in the checkpoint are still used. `importedUntil`
+   (extension 6) is no longer needed.
+3. **Start of the job**: the *From* setting, else one query for the first `value` point over the selected
+   measurements.
+4. **Throughput for several years of history**: InfluxDB 3 answers a write only after its write-ahead log was flushed
+   (about once per second), so one connection writes about one request per second whatever its size (measured:
+   5 000 lines → 5 000 points/s, 50 000 → 50 000/s, 2 × 50 000 in parallel → 100 000/s). Import writes therefore use
+   50 000 lines per request (setting, ≤ 8 MiB) and 2 parallel requests (setting, 1–4), with a timeout of at least
+   60 s; a write timeout halves the request size (≥ 500 lines), which grows back after 20 good writes.
+5. **Patient, unattended runs**: reads and writes wait for an unreachable server (transport error, timeout, HTTP 5xx)
+   as long as it takes, with backoff up to 60 s – the status says since when; only authentication/configuration errors
+   stop the job. Progress is saved after every window. An import interrupted by an adapter restart (abort reason
+   `pause`) is marked active in the checkpoint and continues by itself 30 s after the next start, if its settings are
+   unchanged; *Stop* in Admin ends it until *Start*.
+6. **Estimate**: when planning, the points of the period are counted (Flux `count()` / InfluxQL `COUNT`, an estimate
+   only – a slow or failing count is skipped; the preview waits at most 30 s). Progress and time left then follow
+   the points instead of the time axis (early years usually have fewer states).
+7. **Progress and preview**: progress shows the date reached, points (of about N), points/s and the time left.
+   The preview no longer queries InfluxDB 3 and no longer asks for a time range per state: it shows the planned
+   period, how many states end at a known first live value, sample records from the newest hour, and – for Core –
+   that queries over more than about 3 days of history need a higher `--query-file-limit` or InfluxDB 3 Enterprise
+   (compaction; free licence for at-home use).
+8. Checkpoint format version 2 (window position `doneUntil`, per-state ends, `expected`, `active`); a version 1
+   checkpoint is not resumed, only its live-start times are taken over.

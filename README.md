@@ -280,28 +280,42 @@ custom tags (`room: Kotłownia (5), Salon (3), Garaż (1)`). Catalog changes are
    organisation, user). Enter the password (1.x) or a read token (2.x) – they cannot be read from another adapter.
    They are stored encrypted and never logged. **Save.**
 2. Optional: limit the states (`hm-rpc.0.*, javascript.0.*`) and the period.
-3. *Test connection*, then *Preview (dry run)*: per state the old measurement (alias of the `influxdb.N` settings,
-   else the id), the old and the imported period, the target table and the first converted records; old
-   measurements that are not imported are listed with the reason (state filter, other influxdb instance, conflict,
-   no state). Nothing is written.
-4. *Start / continue*. Progress, imported and rejected points are shown live (`info.dataMigration.*`).
-   *Stop* or an adapter restart keeps the progress – *Start* continues where it stopped. *Reset progress* starts
-   the next import from the beginning.
+3. *Test connection*, then *Preview (dry run)*: the period that will be imported, how many states end at a known
+   first live value, and for the first states the old measurement (alias of the `influxdb.N` settings, else the id),
+   the target table and converted records from the newest hour; old measurements that are not imported are listed
+   with the reason (state filter, other influxdb instance, conflict, no state). Nothing is written.
+4. *Start / continue*. Progress (date reached, points, points/s, estimated time left), imported and rejected points
+   are shown live (`info.dataMigration.*`). *Stop* or an adapter restart keeps the progress – *Start* continues where
+   it stopped. *Reset progress* starts the next import from the beginning.
 
 Which states: those configured for this instance **and** those only `influxdb.N` logs. The latter are imported with
 the table and tags that *Apply* in *Migration of settings* would give them (same rules, saved catalog) – no setting
 is changed. Best order: apply the settings migration first, then import – each state then ends exactly at its first
 live value. Applied after the import, the time in between is filled by importing again (*Reset progress* → *Start*).
 
+How the import runs (built for many states and years of data): it walks the time axis **once** – each time window
+is read for all states with one query (adaptive: 1 minute … 30 days, about 40 000–100 000 points per window), the
+next window is read while the current one is written. InfluxDB 3 is never queried during the import, so its size
+does not slow the import down. Writes go out as large requests (default 50 000 points) two at a time – InfluxDB 3
+answers each write only after its write-ahead log was flushed (about once per second), so request size, not count,
+sets the speed. Answers that are too large or too slow shrink the window; a write timeout halves the request size.
+While either server is not reachable (e.g. restarted) the import waits as long as it takes and continues by itself;
+after an adapter restart it continues by itself, too (*Stop* ends it until *Start*). Before starting, the points are
+counted, so the progress shows "of about N points" and the time left.
+
 How the points are written: exactly like live values of the state today (table, catalog tags, metadata, rounding,
-value type; values that cannot be converted are counted and skipped). By default each state is imported only up to
-the first value influx-v3 already wrote for it, so history and live data do not overlap; writing the same point twice
-only overwrites it. The import writes directly (not through the live buffer) and waits while the live buffer fills up.
+value type; values that cannot be converted are counted and skipped). By default each state ends at the first live
+value this instance logged for it – the adapter records that time in its data directory (`live-start.json`). States
+without such a record end at the start of the import; points logged by both adapters have the same timestamp, so
+they simply overwrite each other. The import writes directly (not through the live buffer) and waits while the live
+buffer fills up.
 
 Limits: dynamic `{state:…}` tags are not reconstructed for the past. InfluxDB 3 Core cannot delete single points –
 check the preview before *Start*; a second import with other tag rules creates additional series (to redo it, drop
-the table). Core is optimised for recent data: queries over many imported years may hit the server's
-`--query-file-limit` (raise it or query shorter periods).
+the table). **InfluxDB 3 Core and long periods**: Core stores one Parquet file per table and 10 minutes and never
+merges them; one query may read at most `--query-file-limit` files (default 432 ≈ 3 days). To query weeks or years
+of imported history (e.g. in Grafana), start Core with a higher `--query-file-limit` (more memory per query) or use
+InfluxDB 3 Enterprise, whose compaction merges old files (free licence for at-home use).
 
 ## Troubleshooting
 
@@ -315,6 +329,8 @@ the table). Core is optimised for recent data: queries over many imported years 
 | history empty after changing table/mode | old data stays in the old table – query it directly with SQL |
 | behind a reverse proxy | put the path prefix into the URL (`https://host/influx`) |
 | HTTP proxy | not supported in 0.1.0 |
+| "Query would scan … Parquet files, exceeding the file limit" | InfluxDB 3 Core: the query covers more than about 3 days – query a shorter period, raise `--query-file-limit` or use Enterprise (see *Migration of data* → Limits). The import itself no longer queries InfluxDB 3 |
+| import stopped with "timeout after 10000 ms" (versions before the time-sliced import) | update; the import no longer asks InfluxDB 3 for the first value of each state |
 | Rule table with many rows: *Old values* load slowly | the used tags are read once and shared by all cells (old database: cached 10 min, a cell waits at most 2 s for it); the first page load after a start can show values from the settings only – reopen the tab a moment later |
 
 ## Development
@@ -329,6 +345,7 @@ eval "$(scripts/legacy-influx-test-server.sh start)"   # InfluxDB 1.8 + 2.7 as i
 npm run test:influx      # tests against the real servers (incl. outage/replay, kill -9 recovery, import 1.x/2.x → 3)
 npm run test:integration # js-controller harness (adapter lifecycle; end-to-end with INFLUX3_* set)
 npx tsx scripts/loadtest.ts 100,1000,10000 20
+npx tsx scripts/import-loadtest.ts 548 3 300   # history import, see the header of the script
 scripts/influx3-test-server.sh stop && scripts/legacy-influx-test-server.sh stop
 ```
 
@@ -343,6 +360,11 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 -->
 ### **WORK IN PROGRESS**
 
+* (Piotr Siedlak) Migration of data redesigned for histories of several years: one pass over the time axis for all
+  states (one query per time window, read-ahead), no queries against InfluxDB 3 (first live value recorded by the
+  adapter), large parallel write requests (about 20× faster), waits for restarted servers and continues after an
+  adapter restart by itself, point count with progress, points/s and time left. Fixes imports that stopped with
+  "timeout after 10000 ms" or "Query would scan 432 Parquet files"
 * (Piotr Siedlak) Migration of data: states that only the influxdb adapter logs are imported too (with the table and
   tags the settings migration would give them, no setting changed); the preview groups the old measurements that are
   not imported by reason

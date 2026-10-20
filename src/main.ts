@@ -30,6 +30,7 @@ import {
     jobKey,
     newCheckpoint,
     parseDataMigrationConfig,
+    PAUSE,
     previewImport,
     type Progress as ImportProgress,
     validateSource,
@@ -41,7 +42,6 @@ import {
     type HistoryTarget,
     mapHistoryRows,
     normalizeHistoryOptions,
-    quoteIdent,
 } from './lib/historyService';
 import { HttpError, InfluxV3Client } from './lib/influxClient';
 import { createLegacyReader, type LegacyPoint, type LegacySourceConfig, type LegacyTagUse } from './lib/legacySource';
@@ -91,6 +91,7 @@ import {
     resolveTags,
     type TagContext,
 } from './lib/tagResolver';
+import { LiveStartStore } from './lib/liveStart';
 import { SharedCache } from './lib/sharedCache';
 import { proposeStandard, type ValueStyle } from './lib/tagStandard';
 import { WriteQueue } from './lib/writeQueue';
@@ -164,6 +165,10 @@ export class InfluxV3Adapter extends utils.Adapter {
     private influxConnected = false;
     /** running import of historical data */
     private dmRun?: { ctrl: AbortController; done: Promise<JobOutcome> };
+    /** first live value per state - the import of historical data ends there (ADR-0006, extension 7) */
+    private liveStarts?: LiveStartStore;
+    private liveStartTimer?: ioBroker.Timeout;
+    private dmResumeTimer?: ioBroker.Timeout;
     private dmLastProgress = 0;
     /**
      * Used tags of the settings and of the old database. Every cell of the rule table asks for them (two requests per
@@ -201,6 +206,8 @@ export class InfluxV3Adapter extends utils.Adapter {
         }
         await this.setStateAsync('info.connection', false, true);
         await this.setStateAsync('info.dataMigration.running', false, true);
+        this.liveStarts = new LiveStartStore(path.join(utils.getAbsoluteInstanceDataDir(this), 'live-start.json'));
+        await this.liveStarts.load();
 
         this.schema = new SchemaRegistry(config.maxTables, config.maxColumns);
         this.cardinality = new CardinalityGuard(config.maxTagValuesPerKey, (key, limit) =>
@@ -271,6 +278,11 @@ export class InfluxV3Adapter extends utils.Adapter {
         this.log.info(
             `InfluxDB 3 adapter ready: ${this.registry.size} state(s) logged into database "${config.database}" (${config.schemaMode} mode, ${config.bufferMode} buffer)`,
         );
+        // an import interrupted by the restart continues once live logging runs
+        this.dmResumeTimer = this.setTimeout(() => {
+            this.dmResumeTimer = undefined;
+            void this.resumeImport().catch(e => this.log.warn(`Data import not continued: ${redact(e)}`));
+        }, 30_000);
     }
 
     /** Managed adapter timers (cleared by js-controller on unload) for the queue and the filters */
@@ -341,9 +353,11 @@ export class InfluxV3Adapter extends utils.Adapter {
         this.clearInterval(this.pingTimer);
         this.clearInterval(this.statsTimer);
         this.clearTimeout(this.enumReloadTimer);
+        this.clearTimeout(this.liveStartTimer);
+        this.clearTimeout(this.dmResumeTimer);
         if (this.dmRun) {
-            // the import saves its progress and continues with "Start" after the restart
-            this.dmRun.ctrl.abort();
+            // the import saves its progress and continues by itself after the restart
+            this.dmRun.ctrl.abort(PAUSE);
             await Promise.race([this.dmRun.done, delay(3000)]);
         }
         this.queue?.beginShutdown();
@@ -360,6 +374,7 @@ export class InfluxV3Adapter extends utils.Adapter {
             }
         }
         this.client?.close();
+        await this.liveStarts?.save().catch(e => this.log.warn(`Cannot save the live-start times: ${redact(e)}`));
         await this.setStateAsync('info.connection', false, true).catch(() => undefined);
     }
 
@@ -374,7 +389,7 @@ export class InfluxV3Adapter extends utils.Adapter {
             ca: config.tlsCa,
             gzip: config.gzip,
             noSync: config.noSync,
-            maxSockets: config.maxConcurrentWrites + 2,
+            maxSockets: config.maxConcurrentWrites + 6, // + queries and up to 4 parallel import writes
         });
     }
 
@@ -1167,6 +1182,9 @@ export class InfluxV3Adapter extends utils.Adapter {
             const line = serialize(this.toRecord(reg, s));
             if (this.queue.push(line)) {
                 this.stats.counters.queued++;
+                if (this.liveStarts?.mark(id, s.ts)) {
+                    this.saveLiveStartsSoon();
+                }
             }
             if (reg.cfg.enableDebugLogs) {
                 this.log.debug(`${id}: queued (${reason}) ${line}`);
@@ -1178,6 +1196,17 @@ export class InfluxV3Adapter extends utils.Adapter {
                 `${id}: record cannot be serialised: ${e instanceof LineProtocolError ? e.message : redact(e)}`,
             );
         }
+    }
+
+    /** Saves the live-start times a few seconds after the first value of a state (one write for many states). */
+    private saveLiveStartsSoon(): void {
+        if (this.liveStartTimer || this.stopping) {
+            return;
+        }
+        this.liveStartTimer = this.setTimeout(() => {
+            this.liveStartTimer = undefined;
+            void this.liveStarts?.save().catch(e => this.log.warn(`Cannot save the live-start times: ${redact(e)}`));
+        }, 5000);
     }
 
     private onRejected(items: { line: string; message: string }[]): void {
@@ -2412,34 +2441,13 @@ export class InfluxV3Adapter extends utils.Adapter {
         return out;
     }
 
+    /** InfluxDB 3 as import target: direct writes with a long timeout (old data can be slow to persist) */
     private dmTarget(): ImportTarget {
+        const timeoutMs = Math.max(60_000, this.cfg.requestTimeoutMs);
         return {
-            firstTime: async (item, after) => {
-                const reg = this.registry.get(item.id);
-                if (!reg || !this.client) {
-                    return undefined;
-                }
-                const since =
-                    after !== undefined && Number.isFinite(after)
-                        ? ` AND time >= to_timestamp_millis(${Math.floor(after)})`
-                        : '';
-                try {
-                    const rows = await this.client.querySql<{ first?: unknown }>(
-                        `SELECT CAST(MIN(time) AS BIGINT) / 1000000 AS first FROM ${quoteIdent(reg.target.table)} WHERE state_id = $sid${since}`,
-                        { sid: reg.storeId },
-                    );
-                    const v = rows[0]?.first;
-                    return v === null || v === undefined || !Number.isFinite(Number(v)) ? undefined : Number(v);
-                } catch (e) {
-                    if (e instanceof HttpError && /not found|does not exist/i.test(`${e.message} ${e.body}`)) {
-                        return undefined; // table not created yet
-                    }
-                    throw e;
-                }
-            },
             write: lines =>
                 this.client
-                    ? this.client.write(lines)
+                    ? this.client.write(lines, timeoutMs)
                     : Promise.resolve({ kind: 'transient' as const, message: 'not connected' }),
             busy: () => {
                 const st = this.queue?.stats();
@@ -2502,19 +2510,22 @@ export class InfluxV3Adapter extends utils.Adapter {
                 return this.reply(msg, { error: `Old database: ${check.error}` });
             }
             const cp = await new FileCheckpointStore(this.dmFile()).load();
-            let text = await previewImport(
-                items,
-                { source: reader, target: this.dmTarget() },
-                job,
-                cp,
-                this.dmKey(source, job, rules),
-                { detailed: 15, samples: 2 },
-                await this.dmOwners(job, items, skipped),
-                this.namespace,
-            );
+            let text = await previewImport(items, {
+                source: reader,
+                settings: job,
+                checkpoint: cp,
+                key: this.dmKey(source, job, rules),
+                now: Date.now(),
+                liveStart: id => this.liveStarts?.get(id),
+                owners: await this.dmOwners(job, items, skipped),
+                target: this.namespace,
+            });
             const retention = await this.client?.getRetentionMs().catch(() => undefined);
             if (retention) {
                 text += `\nNote: the InfluxDB 3 database keeps data only ${Math.round(retention / 86_400_000)} day(s) - older imported points are removed by the server.`;
+            }
+            if (this.stats.serverEdition === 'core') {
+                text += `\nNote: InfluxDB 3 Core stores one file per table and 10 minutes and does not compact them; a query may read at most --query-file-limit files (default 432 ≈ 3 days). To query longer imported periods (e.g. in Grafana), start the server with a higher --query-file-limit or use InfluxDB 3 Enterprise (compaction; free licence for at-home use).`;
             }
             if (warnings.length) {
                 text = `Warnings: ${warnings.join('; ')}\n\n${text}`;
@@ -2528,33 +2539,40 @@ export class InfluxV3Adapter extends utils.Adapter {
     }
 
     private async handleDmStart(msg: ioBroker.Message): Promise<void> {
+        this.reply(msg, await this.startImport(msg.from));
+    }
+
+    /**
+     * Starts or continues the import of historical data.
+     *
+     * @param by who started it (for the log)
+     */
+    private async startImport(by: string): Promise<{ result?: string; error?: string }> {
         if (this.dmRun) {
-            return this.reply(msg, { error: 'The import is already running' });
+            return { error: 'The import is already running' };
         }
         const { source, job, warnings, rules } = this.dmConfig();
         const errors = validateSource(source);
         if (errors.length) {
-            return this.reply(msg, { error: errors.join('; ') });
+            return { error: errors.join('; ') };
         }
         const { items, skipped } = await this.dmItems(job, rules);
         if (!items.length) {
-            return this.reply(msg, {
+            return {
                 error: `Nothing to import: neither ${this.namespace} nor the influxdb adapter logs a state that matches the selection${skipped.size ? ` (${skipped.size} state(s) cannot be imported - see "Preview")` : ''}.`,
-            });
+            };
         }
         const key = this.dmKey(source, job, rules);
         const store = new FileCheckpointStore(this.dmFile());
         const cp = await store.load();
         if (cp && cp.jobKey === key && cp.finished) {
-            return this.reply(msg, {
-                error: 'An import with these settings is already finished. "Reset progress" imports again.',
-            });
+            return { error: 'An import with these settings is already finished. "Reset progress" imports again.' };
         }
         const reader = createLegacyReader(source);
         const check = await reader.check();
         if (!check.ok) {
             reader.close();
-            return this.reply(msg, { error: `Old database: ${check.error}` });
+            return { error: `Old database: ${check.error}` };
         }
         const ctrl = new AbortController();
         const runner = new DataMigrationJob(
@@ -2570,6 +2588,7 @@ export class InfluxV3Adapter extends utils.Adapter {
                     debug: m => this.log.debug(redact(m)),
                 },
                 onProgress: p => this.dmProgress(p),
+                liveStart: id => this.liveStarts?.get(id),
             },
             job,
         );
@@ -2587,16 +2606,33 @@ export class InfluxV3Adapter extends utils.Adapter {
         this.dmRun = { ctrl, done };
         const pending = items.filter(i => i.pending).length;
         this.log.info(
-            `Data import started by ${msg.from}: ${items.length} state(s)${pending ? ` (${pending} not configured for ${this.namespace} yet - mapping of the settings migration)` : ''} from InfluxDB ${source.version}${warnings.length ? ` (warnings: ${warnings.join('; ')})` : ''}`,
+            `Data import started by ${by}: ${items.length} state(s)${pending ? ` (${pending} not configured for ${this.namespace} yet - mapping of the settings migration)` : ''} from InfluxDB ${source.version}${warnings.length ? ` (warnings: ${warnings.join('; ')})` : ''}`,
         );
-        this.reply(msg, { result: `Import of ${items.length} state(s) started - see the progress below and the log.` });
+        return { result: `Import of ${items.length} state(s) started - see the progress below and the log.` };
+    }
+
+    /** An import interrupted by a restart (not stopped in Admin) continues by itself with unchanged settings. */
+    private async resumeImport(): Promise<void> {
+        const cp = await new FileCheckpointStore(this.dmFile()).load();
+        if (!cp?.active || cp.finished || this.dmRun || this.stopping) {
+            return;
+        }
+        const { source, job, rules } = this.dmConfig();
+        if (validateSource(source).length || cp.jobKey !== this.dmKey(source, job, rules)) {
+            this.log.info('Data import: the settings changed since the interrupted import - press "Start" to continue');
+            return;
+        }
+        const res = await this.startImport('the restart of the adapter');
+        if (res.error) {
+            this.log.warn(`Data import not continued after the restart: ${res.error}`);
+        }
     }
 
     private handleDmStop(msg: ioBroker.Message): void {
         if (!this.dmRun) {
             return this.reply(msg, { result: 'No import is running.' });
         }
-        this.dmRun.ctrl.abort();
+        this.dmRun.ctrl.abort('stop');
         this.log.info(`Data import stopped by ${msg.from}`);
         this.reply(msg, { result: 'Stopping - the progress is saved, "Start" continues.' });
     }

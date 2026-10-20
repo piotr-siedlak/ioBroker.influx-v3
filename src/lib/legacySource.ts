@@ -56,7 +56,11 @@ export interface LegacyTagUse {
 /** maximum number of values read per tag key */
 export const MAX_TAG_VALUES = 5000;
 
-export type LegacyErrorKind = 'tooBig' | 'auth' | 'notFound' | 'query' | 'transport';
+/**
+ * tooBig: answer over the size limit · timeout: no answer in time · transport: server not reachable ·
+ * server: HTTP 5xx (often an overloaded server) · auth/notFound/query: wrong settings or query
+ */
+export type LegacyErrorKind = 'tooBig' | 'timeout' | 'auth' | 'notFound' | 'query' | 'server' | 'transport';
 
 export class LegacyReadError extends Error {
     constructor(
@@ -68,6 +72,14 @@ export class LegacyReadError extends Error {
     }
 }
 
+/** Measurements of a query: a list, or every measurement of the database/bucket */
+export type MeasurementSet = readonly string[] | 'all';
+
+/** measurements per query when a list is read (keeps the query text small; Flux refuses very long `or` chains) */
+export const MEASUREMENTS_PER_QUERY = 100;
+/** query groups read at the same time */
+const READ_PARALLEL = 2;
+
 /** Interface of the source used by the import job (implemented for 1.x and 2.x, faked in tests) */
 export interface LegacyReader {
     /** reachability, authentication and access to database/bucket */
@@ -76,6 +88,12 @@ export interface LegacyReader {
     timeRange(measurement: string): Promise<{ first?: number; last?: number }>;
     /** points with from <= ts < to, sorted by time */
     read(measurement: string, from: number, to: number): Promise<LegacyPoint[]>;
+    /** points of several measurements with from <= ts < to, per measurement sorted by time */
+    readMany(measurements: MeasurementSet, from: number, to: number): Promise<Map<string, LegacyPoint[]>>;
+    /** time of the first `value` point over the measurements (undefined if there is none) */
+    firstTime(measurements: MeasurementSet): Promise<number | undefined>;
+    /** number of `value` points of the measurements with from <= ts < to */
+    countPoints(measurements: MeasurementSet, from: number, to: number): Promise<number>;
     /** names of the measurements (up to `limit`) */
     listMeasurements(limit: number): Promise<string[]>;
     /** all custom tag keys and values stored in the points (without ack/q/from) */
@@ -133,6 +151,88 @@ export function influxQLSource(measurement: string, retentionPolicy: string): st
  */
 export function buildInfluxQLRead(measurement: string, retentionPolicy: string, from: number, to: number): string {
     return `SELECT * FROM ${influxQLSource(measurement, retentionPolicy)} WHERE time >= ${Math.floor(from)}ms AND time < ${Math.floor(to)}ms GROUP BY *`;
+}
+
+/**
+ * InfluxQL request of one time window over several measurements: one statement per measurement in one request.
+ * (One statement over several measurements would give a field one type for all of them - the boolean `value` of a
+ * switch would come back empty next to the numbers of a sensor.)
+ *
+ * @param measurements measurements
+ * @param retentionPolicy retention policy or ''
+ * @param from start (ms, inclusive)
+ * @param to end (ms, exclusive)
+ */
+export function buildInfluxQLReadMany(
+    measurements: readonly string[],
+    retentionPolicy: string,
+    from: number,
+    to: number,
+): string {
+    return measurements.map(m => buildInfluxQLRead(m, retentionPolicy, from, to)).join('; ');
+}
+
+/**
+ * Flux filter of a measurement list (an `or` chain, which the storage engine can use), nothing for all.
+ *
+ * @param measurements measurements
+ */
+function fluxMeasurementFilter(measurements: MeasurementSet): string[] {
+    if (measurements === 'all') {
+        return [];
+    }
+    return [`  |> filter(fn: (r) => ${measurements.map(m => `r._measurement == ${quoteFluxString(m)}`).join(' or ')})`];
+}
+
+/**
+ * Flux query of one time window over several measurements, fields pivoted into columns.
+ *
+ * @param bucket bucket
+ * @param measurements measurements
+ * @param from start (ms, inclusive)
+ * @param to end (ms, exclusive)
+ */
+export function buildFluxReadMany(bucket: string, measurements: MeasurementSet, from: number, to: number): string {
+    return [
+        `from(bucket: ${quoteFluxString(bucket)})`,
+        `  |> range(start: time(v: ${quoteFluxString(new Date(from).toISOString())}), stop: time(v: ${quoteFluxString(new Date(to).toISOString())}))`,
+        ...fluxMeasurementFilter(measurements),
+        '  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")',
+    ].join('\n');
+}
+
+/**
+ * Flux query of the first `value` point over several measurements.
+ *
+ * @param bucket bucket
+ * @param measurements measurements
+ */
+export function buildFluxFirstTime(bucket: string, measurements: MeasurementSet): string {
+    return [
+        `from(bucket: ${quoteFluxString(bucket)})`,
+        `  |> range(start: time(v: "${FAR_PAST}"), stop: time(v: "${FAR_FUTURE}"))`,
+        ...fluxMeasurementFilter(measurements),
+        '  |> filter(fn: (r) => r._field == "value")',
+        '  |> first() |> keep(columns: ["_time"]) |> group() |> sort(columns: ["_time"]) |> limit(n: 1)',
+    ].join('\n');
+}
+
+/**
+ * Flux query of the number of `value` points over several measurements in a period (one row).
+ *
+ * @param bucket bucket
+ * @param measurements measurements
+ * @param from start (ms, inclusive)
+ * @param to end (ms, exclusive)
+ */
+export function buildFluxCount(bucket: string, measurements: MeasurementSet, from: number, to: number): string {
+    return [
+        `from(bucket: ${quoteFluxString(bucket)})`,
+        `  |> range(start: time(v: ${quoteFluxString(new Date(from).toISOString())}), stop: time(v: ${quoteFluxString(new Date(to).toISOString())}))`,
+        ...fluxMeasurementFilter(measurements),
+        '  |> filter(fn: (r) => r._field == "value")',
+        '  |> count() |> group() |> sum()',
+    ].join('\n');
 }
 
 /**
@@ -307,6 +407,24 @@ export function influxQLSeriesToPoints(series: InfluxQLSeries[]): LegacyPoint[] 
     return out.sort((a, b) => a.ts - b.ts);
 }
 
+/**
+ * Points of an InfluxDB 1.x answer to {@link buildInfluxQLReadMany}, per measurement.
+ *
+ * @param series series of the statement
+ */
+export function influxQLSeriesToPointMap(series: InfluxQLSeries[]): Map<string, LegacyPoint[]> {
+    const byName = new Map<string, InfluxQLSeries[]>();
+    for (const s of series) {
+        const name = s.name ?? '';
+        byName.set(name, [...(byName.get(name) ?? []), s]);
+    }
+    const out = new Map<string, LegacyPoint[]>();
+    for (const [name, list] of byName) {
+        out.set(name, influxQLSeriesToPoints(list));
+    }
+    return out;
+}
+
 /** One table block of an annotated CSV answer */
 export interface CsvTable {
     columns: string[];
@@ -455,13 +573,29 @@ const NOT_DATA = new Set(['', 'result', 'table', '_start', '_stop', '_measuremen
  * @param tables parsed CSV blocks
  */
 export function fluxTablesToPoints(tables: CsvTable[]): LegacyPoint[] {
-    const out: LegacyPoint[] = [];
+    return [...fluxTablesToPointMap(tables).values()].flat().sort((a, b) => a.ts - b.ts);
+}
+
+/**
+ * Points of an InfluxDB 2.x answer to {@link buildFluxReadMany}, per measurement.
+ *
+ * @param tables parsed CSV blocks
+ */
+export function fluxTablesToPointMap(tables: CsvTable[]): Map<string, LegacyPoint[]> {
+    const out = new Map<string, LegacyPoint[]>();
     for (const t of tables) {
         const timeIdx = t.columns.indexOf('_time');
         if (timeIdx < 0) {
             continue;
         }
+        const mIdx = t.columns.indexOf('_measurement');
         for (const row of t.rows) {
+            const measurement = mIdx < 0 ? '' : row[mIdx] || t.defaults[mIdx] || '';
+            let list = out.get(measurement);
+            if (!list) {
+                list = [];
+                out.set(measurement, list);
+            }
             const fields: Record<string, unknown> = {};
             const tags: Record<string, string> = {};
             t.columns.forEach((c, i) => {
@@ -480,11 +614,48 @@ export function fluxTablesToPoints(tables: CsvTable[]): LegacyPoint[] {
             const ts = convertCell(row[timeIdx] ?? '', t.types[timeIdx] ?? 'dateTime:RFC3339', '') as number;
             const p = toLegacyPoint(ts, fields, tags);
             if (p) {
-                out.push(p);
+                list.push(p);
             }
         }
     }
-    return out.sort((a, b) => a.ts - b.ts);
+    for (const list of out.values()) {
+        list.sort((a, b) => a.ts - b.ts);
+    }
+    return out;
+}
+
+/**
+ * Splits a measurement list into query groups; `all` stays one group.
+ *
+ * @param measurements measurements
+ */
+function queryGroups(measurements: MeasurementSet): MeasurementSet[] {
+    if (measurements === 'all') {
+        return ['all'];
+    }
+    const out: string[][] = [];
+    for (let i = 0; i < measurements.length; i += MEASUREMENTS_PER_QUERY) {
+        out.push(measurements.slice(i, i + MEASUREMENTS_PER_QUERY));
+    }
+    return out;
+}
+
+/**
+ * Adds the points of one query group to the result.
+ *
+ * @param into result
+ * @param part points of one group
+ */
+function mergePoints(into: Map<string, LegacyPoint[]>, part: Map<string, LegacyPoint[]>): void {
+    for (const [m, pts] of part) {
+        const have = into.get(m);
+        if (have) {
+            have.push(...pts);
+            have.sort((a, b) => a.ts - b.ts);
+        } else {
+            into.set(m, pts);
+        }
+    }
 }
 
 // ------------------------------------------------------------------ readers
@@ -536,6 +707,9 @@ abstract class HttpReader implements LegacyReader {
             if (e instanceof TransportError && e.code === 'ETOOBIG') {
                 throw new LegacyReadError(e.message, 'tooBig');
             }
+            if (e instanceof TransportError && e.code === 'ETIMEDOUT') {
+                throw new LegacyReadError(e.message, 'timeout');
+            }
             throw new LegacyReadError(redact(e), 'transport');
         }
         if (res.status === 401 || res.status === 403) {
@@ -562,7 +736,7 @@ abstract class HttpReader implements LegacyReader {
             } catch {
                 // plain text
             }
-            throw new LegacyReadError(`HTTP ${res.status}: ${redact(message)}`, 'query');
+            throw new LegacyReadError(`HTTP ${res.status}: ${redact(message)}`, res.status >= 500 ? 'server' : 'query');
         }
         return res.body;
     }
@@ -592,6 +766,46 @@ abstract class HttpReader implements LegacyReader {
 
     abstract timeRange(measurement: string): Promise<{ first?: number; last?: number }>;
     abstract read(measurement: string, from: number, to: number): Promise<LegacyPoint[]>;
+    protected abstract readGroup(
+        measurements: MeasurementSet,
+        from: number,
+        to: number,
+    ): Promise<Map<string, LegacyPoint[]>>;
+    protected abstract firstTimeOfGroup(measurements: MeasurementSet): Promise<number | undefined>;
+    protected abstract countGroup(measurements: MeasurementSet, from: number, to: number): Promise<number>;
+
+    /** query groups are read two at a time (the reader keeps two connections) */
+    async readMany(measurements: MeasurementSet, from: number, to: number): Promise<Map<string, LegacyPoint[]>> {
+        const out = new Map<string, LegacyPoint[]>();
+        const groups = queryGroups(measurements).filter(g => g.length);
+        for (let i = 0; i < groups.length; i += READ_PARALLEL) {
+            const parts = await Promise.all(groups.slice(i, i + READ_PARALLEL).map(g => this.readGroup(g, from, to)));
+            for (const part of parts) {
+                mergePoints(out, part);
+            }
+        }
+        return out;
+    }
+
+    async countPoints(measurements: MeasurementSet, from: number, to: number): Promise<number> {
+        let n = 0;
+        for (const group of queryGroups(measurements)) {
+            n += group.length ? await this.countGroup(group, from, to) : 0;
+        }
+        return n;
+    }
+
+    async firstTime(measurements: MeasurementSet): Promise<number | undefined> {
+        let first: number | undefined;
+        for (const group of queryGroups(measurements)) {
+            const t = group.length ? await this.firstTimeOfGroup(group) : undefined;
+            if (t !== undefined && (first === undefined || t < first)) {
+                first = t;
+            }
+        }
+        return first;
+    }
+
     abstract listMeasurements(limit: number): Promise<string[]>;
     abstract tagInventory(): Promise<LegacyTagUse[]>;
 
@@ -653,6 +867,76 @@ export class InfluxDB1Reader extends HttpReader {
     async read(measurement: string, from: number, to: number): Promise<LegacyPoint[]> {
         const [series] = await this.query(buildInfluxQLRead(measurement, this.cfg.retentionPolicy, from, to));
         return influxQLSeriesToPoints(series ?? []);
+    }
+
+    private measurementList?: string[];
+
+    /** InfluxQL needs one statement per measurement (types per measurement), so "all" becomes the list */
+    private async expand(measurements: MeasurementSet): Promise<readonly string[]> {
+        if (measurements !== 'all') {
+            return measurements;
+        }
+        this.measurementList ??= await this.listMeasurements(100_000);
+        return this.measurementList;
+    }
+
+    override async readMany(
+        measurements: MeasurementSet,
+        from: number,
+        to: number,
+    ): Promise<Map<string, LegacyPoint[]>> {
+        return super.readMany(await this.expand(measurements), from, to);
+    }
+
+    override async firstTime(measurements: MeasurementSet): Promise<number | undefined> {
+        return super.firstTime(await this.expand(measurements));
+    }
+
+    override async countPoints(measurements: MeasurementSet, from: number, to: number): Promise<number> {
+        return super.countPoints(await this.expand(measurements), from, to);
+    }
+
+    protected async countGroup(measurements: MeasurementSet, from: number, to: number): Promise<number> {
+        const list = await this.expand(measurements);
+        const results = await this.query(
+            list
+                .map(
+                    m =>
+                        `SELECT COUNT("value") FROM ${influxQLSource(m, this.cfg.retentionPolicy)} WHERE time >= ${Math.floor(from)}ms AND time < ${Math.floor(to)}ms`,
+                )
+                .join('; '),
+        );
+        let n = 0;
+        for (const s of results.flat()) {
+            const v = s.values?.[0]?.[1];
+            n += typeof v === 'number' ? v : 0;
+        }
+        return n;
+    }
+
+    protected async readGroup(
+        measurements: MeasurementSet,
+        from: number,
+        to: number,
+    ): Promise<Map<string, LegacyPoint[]>> {
+        const list = await this.expand(measurements);
+        const results = await this.query(buildInfluxQLReadMany(list, this.cfg.retentionPolicy, from, to));
+        return influxQLSeriesToPointMap(results.flat());
+    }
+
+    protected async firstTimeOfGroup(measurements: MeasurementSet): Promise<number | undefined> {
+        const list = await this.expand(measurements);
+        const results = await this.query(
+            list.map(m => `SELECT FIRST("value") FROM ${influxQLSource(m, this.cfg.retentionPolicy)}`).join('; '),
+        );
+        let first: number | undefined;
+        for (const s of results.flat()) {
+            const v = s.values?.[0]?.[0];
+            if (typeof v === 'number' && (first === undefined || v < first)) {
+                first = v;
+            }
+        }
+        return first;
     }
 
     async listMeasurements(limit: number): Promise<string[]> {
@@ -736,6 +1020,39 @@ export class InfluxDB2Reader extends HttpReader {
 
     async read(measurement: string, from: number, to: number): Promise<LegacyPoint[]> {
         return fluxTablesToPoints(await this.flux(buildFluxRead(this.cfg.bucket, measurement, from, to)));
+    }
+
+    protected async readGroup(
+        measurements: MeasurementSet,
+        from: number,
+        to: number,
+    ): Promise<Map<string, LegacyPoint[]>> {
+        return fluxTablesToPointMap(await this.flux(buildFluxReadMany(this.cfg.bucket, measurements, from, to)));
+    }
+
+    protected async countGroup(measurements: MeasurementSet, from: number, to: number): Promise<number> {
+        let n = 0;
+        for (const t of await this.flux(buildFluxCount(this.cfg.bucket, measurements, from, to))) {
+            const vi = t.columns.indexOf('_value');
+            for (const row of t.rows) {
+                const v = Number(row[vi]);
+                n += Number.isFinite(v) ? v : 0;
+            }
+        }
+        return n;
+    }
+
+    protected async firstTimeOfGroup(measurements: MeasurementSet): Promise<number | undefined> {
+        for (const t of await this.flux(buildFluxFirstTime(this.cfg.bucket, measurements))) {
+            const ti = t.columns.indexOf('_time');
+            for (const row of t.rows) {
+                const ts = parseRfc3339(row[ti] ?? '');
+                if (Number.isFinite(ts)) {
+                    return ts;
+                }
+            }
+        }
+        return undefined;
     }
 
     async tagInventory(): Promise<LegacyTagUse[]> {
