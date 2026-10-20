@@ -217,3 +217,29 @@ Keys with more than 100 distinct values (identifiers) only get rows for values t
 old key (stable sort, so the rule that wins does not change). Target values of complete rules always join the
 catalog. The message stays short; the full result (coverage, every key with its value mapping) is shown in the panel
 *Result of the last proposal* (`info.migrationProposal`).
+
+## Extension 5 (2026-10-20): rule table with many rows
+
+Reported with screenshots: with ~75 rule rows the *Old values* cells stayed empty and the *Old key* cells kept
+spinning. Reproduced with a local js-controller + Admin 8.3, ~550 states and a slow InfluxDB 2 as old database:
+
+* every cell of the two columns asks the adapter for its list – **142 requests per page load**;
+* each request built the inventory of used tags on its own; nothing was shared between concurrent requests, so with a
+  slow old database **142 parallel reads** of the old database ran (measured) and after 53 s all 71 *Old values*
+  cells were still loading. Older Admin versions draw such a cell empty, and draw nothing at all when the answer is
+  not a list (e.g. an error object).
+
+Decision:
+
+1. **One shared inventory**: concurrent requests wait for the same computation (single flight). The settings part is
+   cached for 30 s and dropped when a custom configuration changes; the old-database part is cached for 10 min
+   (failures for 1 min).
+2. **Dropdowns never wait long for the old database**: they wait at most 2 s, then answer from the settings (and an
+   older old-database result, if any) while the one read continues in the background. "Propose standard" waits for
+   the complete inventory.
+3. **Always a list**: the list commands answer `[]` instead of an error, and *Old values* also lists the values
+   already selected in the row (so the chips always have a label, also for values that are no longer used).
+
+Plan: (a) `SharedCache` (single flight, TTL, stale value, failure TTL) with unit tests; (b) inventory in `main.ts` on
+top of it, bounded wait for the dropdowns, robust list replies; (c) harness test with 150 concurrent requests;
+(d) re-check in the local Admin with the slow old database; (e) docs.

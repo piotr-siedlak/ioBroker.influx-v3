@@ -309,6 +309,7 @@ the table). Core is optimised for recent data: queries over many imported years 
 | history empty after changing table/mode | old data stays in the old table – query it directly with SQL |
 | behind a reverse proxy | put the path prefix into the URL (`https://host/influx`) |
 | HTTP proxy | not supported in 0.1.0 |
+| Rule table with many rows: *Old values* load slowly | the used tags are read once and shared by all cells (old database: cached 10 min, a cell waits at most 2 s for it); the first page load after a start can show values from the settings only – reopen the tab a moment later |
 
 ## Development
 
@@ -345,6 +346,8 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 * (Piotr Siedlak) Settings tables are also accepted when they are stored as objects (e.g. written by scripts)
 * (Piotr Siedlak) Migration of settings: tag rules translate the custom tags of influxdb into catalog tags, with a
   live preview of the result and of the tags that still do not fit
+* (Piotr Siedlak) Fixed: with many rule rows the old values stayed empty - the used tags are now read once and
+  shared by all cells (one read of the old database instead of one per cell), dropdowns always answer with a list
 * (Piotr Siedlak) "Propose standard" writes a complete mapping (every key and value, grouped by old key) and shows
   the full result in a panel; target values of rules from earlier runs are added to the catalog
 * (Piotr Siedlak) "Propose standard" covers every used tag (influxdb settings, old database, this instance), fills

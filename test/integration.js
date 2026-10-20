@@ -69,6 +69,30 @@ async function waitFor(fn, timeoutMs = 15000) {
     }
 }
 
+/**
+ * sendTo that matches the reply by its callback id. harness.sendTo() hands the next reply to whichever call waits,
+ * so it cannot be used for parallel requests (like the many cells of an Admin table).
+ */
+let matchedId = 1_000_000;
+function sendToMatched(harness, command, message, instance = 'influx-v3.0') {
+    return new Promise(resolve => {
+        const id = matchedId++;
+        const handler = (sid, state) => {
+            if (sid === 'messagebox.system.adapter.test.0' && state?.callback?.id === id) {
+                harness.removeListener('stateChange', handler);
+                resolve(state.message);
+            }
+        };
+        harness.addListener('stateChange', handler);
+        harness.dbConnection.pushMessage(`system.adapter.${instance}`, {
+            command,
+            message,
+            from: 'system.adapter.test.0',
+            callback: { message, id, ack: false, time: Date.now() },
+        });
+    });
+}
+
 function sendTo(harness, command, message, instance = 'influx-v3.0') {
     return new Promise(resolve => harness.sendTo(instance, command, message, resolve));
 }
@@ -535,6 +559,39 @@ tests.integration(path.join(__dirname, '..'), {
                     assert.ok(values.includes(v), `${v} in ${values}`);
                 }
                 assert.deepEqual(await sendTo(harness, 'getOldTagValues', { source: 'influxdb.0', key: 'nope' }), []);
+            });
+
+            // A rule table with 71 rows asks 142 times in parallel (old key + old values per row), as measured in Admin.
+            it('many rule rows: 142 parallel dropdown requests are answered quickly, always with lists', async function () {
+                this.timeout(60000);
+                harness.setMaxListeners(500);
+                const t0 = Date.now();
+                const calls = [];
+                for (let i = 0; i < 71; i++) {
+                    calls.push(sendToMatched(harness, 'getOldTagKeys', { source: 'influxdb.0', includeOldPoints: !!V2 }));
+                    calls.push(
+                        sendToMatched(harness, 'getOldTagValues', {
+                            source: 'influxdb.0',
+                            key: 'room',
+                            includeOldPoints: !!V2,
+                            selected: ['a value that is gone'],
+                        }),
+                    );
+                }
+                const results = await Promise.all(calls);
+                const ms = Date.now() - t0;
+                assert.ok(results.every(Array.isArray), 'every answer is a list');
+                assert.ok(ms < 20000, `answered in ${ms} ms`);
+                const keys = results.filter((_, i) => i % 2 === 0);
+                const values = results.filter((_, i) => i % 2 === 1);
+                assert.ok(keys.every(k => k.some(x => x.value === 'room')), JSON.stringify(keys[0]));
+                assert.ok(
+                    values.every(v => v.some(x => x.value === 'a value that is gone' && /not used any more/.test(x.label))),
+                    JSON.stringify(values[0]),
+                );
+                assert.ok(values.every(v => v.some(x => x.value === 'kotlownia')), 'values of the old key');
+                // nonsense input still gives a list
+                assert.deepEqual(await sendToMatched(harness, 'getOldTagValues', { key: 42 }), []);
             });
 
             it('"take over old tags" appends the needed rules with suggestions and keeps existing rows', async function () {

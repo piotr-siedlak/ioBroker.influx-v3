@@ -61,6 +61,7 @@ const redact_1 = require("./lib/redact");
 const schemaMapper_1 = require("./lib/schemaMapper");
 const spool_1 = require("./lib/spool");
 const tagResolver_1 = require("./lib/tagResolver");
+const sharedCache_1 = require("./lib/sharedCache");
 const tagStandard_1 = require("./lib/tagStandard");
 const writeQueue_1 = require("./lib/writeQueue");
 const DYNAMIC_ALLOWED = /^[\p{L}\p{N} _.:/-]{1,128}$/u;
@@ -92,10 +93,12 @@ class InfluxV3Adapter extends utils.Adapter {
     /** running import of historical data */
     dmRun;
     dmLastProgress = 0;
-    /** used tags of the settings (dropdowns of the rule table ask often) */
-    oldTagCache;
-    /** tags stored in the old database (expensive: cached for a minute) */
-    pointTagCache;
+    /**
+     * Used tags of the settings and of the old database. Every cell of the rule table asks for them (two requests per
+     * row), so concurrent requests share one computation (ADR-0006, extension 5).
+     */
+    settingsTags = new sharedCache_1.SharedCache(() => Date.now(), 30_000);
+    pointTags = new sharedCache_1.SharedCache(() => Date.now(), 600_000, 60_000);
     constructor(options = {}) {
         super({ ...options, name: 'influx-v3' });
         this.on('ready', this.onReady.bind(this));
@@ -530,6 +533,9 @@ class InfluxV3Adapter extends utils.Adapter {
         if (id.startsWith('enum.rooms.') || id.startsWith('enum.functions.')) {
             this.scheduleEnumReload();
             return;
+        }
+        if (obj?.common?.custom || this.registry.has(id)) {
+            this.settingsTags.invalidate(); // used tags of the migration
         }
         // system.* states (e.g. system.adapter.x.0.memRss) can be logged too, so no prefix filter here
         const custom = this.customOf(obj);
@@ -1597,25 +1603,21 @@ class InfluxV3Adapter extends utils.Adapter {
      *
      * @param sourceRaw influxdb instance or '' for all
      * @param includePointsRaw read the old database (default: saved option)
+     * @param waitForPointsMs how long to wait for the old database; afterwards the answer uses the settings (and an
+     *     older old-database result) while the one read continues in the background
      */
-    async oldTags(sourceRaw, includePointsRaw) {
+    async oldTags(sourceRaw, includePointsRaw, waitForPointsMs = Number.POSITIVE_INFINITY) {
         const source = typeof sourceRaw === 'string' && /^influxdb\.\d+$/.test(sourceRaw) ? sourceRaw : '';
         const native = this.config;
         const includePoints = typeof includePointsRaw === 'boolean' ? includePointsRaw : native.migrationIncludeOldPoints !== false;
-        const now = Date.now();
-        let settings;
-        if (this.oldTagCache && this.oldTagCache.source === source && now - this.oldTagCache.at < 5000) {
-            settings = this.oldTagCache.inventory;
-        }
-        else {
+        const settings = await this.settingsTags.get(source, async () => {
             const view = await this.getObjectViewAsync('system', 'custom', {});
             const rows = (view?.rows ?? []).map(r => ({
                 id: r.id,
                 custom: r.value ?? {},
             }));
-            settings = (0, tagMapping_1.mergeInventories)((0, migration_1.collectOldTags)(rows, source), (0, migration_1.collectInstanceTags)(rows, this.namespace));
-            this.oldTagCache = { at: now, source, inventory: settings };
-        }
+            return (0, tagMapping_1.mergeInventories)((0, migration_1.collectOldTags)(rows, source), (0, migration_1.collectInstanceTags)(rows, this.namespace));
+        });
         const notes = [];
         if (!includePoints) {
             return { inventory: settings, notes };
@@ -1624,28 +1626,58 @@ class InfluxV3Adapter extends utils.Adapter {
         if ((0, dataMigration_1.validateSource)(db).length) {
             return { inventory: settings, notes }; // no old database configured
         }
-        const ident = JSON.stringify([db.version, db.url, db.database, db.org, db.bucket]);
-        if (!this.pointTagCache || this.pointTagCache.ident !== ident || now - this.pointTagCache.at > 60_000) {
+        const ident = JSON.stringify([db.version, db.url, db.database, db.retentionPolicy, db.org, db.bucket]);
+        const reading = this.pointTags.get(ident, async () => {
             const reader = (0, legacySource_1.createLegacyReader)(db);
             try {
-                this.pointTagCache = { at: now, ident, uses: await reader.tagInventory() };
-            }
-            catch (e) {
-                this.pointTagCache = { at: now, ident, uses: [], error: e instanceof Error ? e.message : (0, redact_1.redact)(e) };
+                return await reader.tagInventory();
             }
             finally {
                 reader.close();
             }
+        });
+        let uses;
+        if (waitForPointsMs === Number.POSITIVE_INFINITY) {
+            try {
+                uses = await reading;
+            }
+            catch (e) {
+                notes.push(`Tags of the old database not read: ${e instanceof Error ? e.message : (0, redact_1.redact)(e)}`);
+            }
         }
-        if (this.pointTagCache.error) {
-            notes.push(`Tags of the old database not read: ${this.pointTagCache.error}`);
+        else {
+            uses = (await this.within(reading, waitForPointsMs)) ?? this.pointTags.peek(ident);
+            if (!uses) {
+                notes.push('Tags of the old database are still being read');
+            }
+        }
+        if (!uses) {
             return { inventory: settings, notes };
         }
         const points = { keys: new Map() };
-        for (const u of this.pointTagCache.uses) {
+        for (const u of uses) {
             (0, tagMapping_1.addToInventory)(points, u.key, u.value, u.measurements ?? 0, 'points');
         }
         return { inventory: (0, tagMapping_1.mergeInventories)(settings, points), notes };
+    }
+    /**
+     * Result of a promise if it settles within the time, else undefined (the promise keeps running; a failure is
+     * swallowed here - the cache remembers it).
+     */
+    within(promise, ms) {
+        return new Promise(resolve => {
+            let settled = false;
+            const timer = {};
+            const finish = (v) => {
+                if (!settled) {
+                    settled = true;
+                    this.clearTimeout(timer.handle);
+                    resolve(v);
+                }
+            };
+            timer.handle = this.setTimeout(() => finish(undefined), ms);
+            promise.then(finish, () => finish(undefined));
+        });
     }
     /** Names of all ioBroker rooms or functions (system language) */
     async enumNames(prefix) {
@@ -1720,7 +1752,14 @@ class InfluxV3Adapter extends utils.Adapter {
     /** Options of the "old key" column: keys of the old custom tags */
     async oldTagKeyOptions(message) {
         const m = (message ?? {});
-        const inv = (await this.oldTags(m.source, m.includeOldPoints)).inventory;
+        let inv;
+        try {
+            inv = (await this.oldTags(m.source, m.includeOldPoints, 2000)).inventory;
+        }
+        catch (e) {
+            this.log.debug(`Old tag keys not available: ${(0, redact_1.redact)(e)}`);
+            return []; // a dropdown needs a list, never an error object
+        }
         return [...inv.keys.values()]
             .sort((a, b) => a.key.localeCompare(b.key))
             .map(e => ({
@@ -1732,13 +1771,25 @@ class InfluxV3Adapter extends utils.Adapter {
     async oldTagValueOptions(message) {
         const m = (message ?? {});
         const key = typeof m.key === 'string' ? m.key.trim().toLowerCase() : '';
-        const entry = key ? (await this.oldTags(m.source, m.includeOldPoints)).inventory.keys.get(key) : undefined;
-        if (!entry) {
-            return [];
+        let entry;
+        try {
+            entry = key ? (await this.oldTags(m.source, m.includeOldPoints, 2000)).inventory.keys.get(key) : undefined;
         }
-        return [...entry.values.keys()]
-            .sort((a, b) => a.localeCompare(b))
-            .map(value => ({ value, label: `${value} (${(0, tagMapping_1.describeUse)(entry, value)})` }));
+        catch (e) {
+            this.log.debug(`Old tag values not available: ${(0, redact_1.redact)(e)}`);
+        }
+        const options = entry
+            ? [...entry.values.keys()]
+                .sort((a, b) => a.localeCompare(b))
+                .map(value => ({ value, label: `${value} (${(0, tagMapping_1.describeUse)(entry, value)})` }))
+            : [];
+        // values already selected in the row always get an option, so their chips have a label
+        for (const v of (0, tagMapping_1.ruleValues)(m.selected)) {
+            if (!options.some(o => o.value === v)) {
+                options.push({ value: v, label: `${v} (not used any more)` });
+            }
+        }
+        return options;
     }
     /** "Take over old tags": appends the rule rows that are still needed (sendTo `useNative`) */
     async handleSuggestRules(msg) {

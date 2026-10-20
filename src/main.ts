@@ -56,10 +56,12 @@ import {
     addToInventory,
     applyTagRules,
     describeUse,
+    type InventoryKey,
     mergeInventories,
     type OldTagInventory,
     parseTagRules,
     ruleToRow,
+    ruleValues,
     suggestTagRules,
     type TagRule,
 } from './lib/tagMapping';
@@ -88,6 +90,7 @@ import {
     resolveTags,
     type TagContext,
 } from './lib/tagResolver';
+import { SharedCache } from './lib/sharedCache';
 import { proposeStandard, type ValueStyle } from './lib/tagStandard';
 import { WriteQueue } from './lib/writeQueue';
 
@@ -148,10 +151,12 @@ export class InfluxV3Adapter extends utils.Adapter {
     /** running import of historical data */
     private dmRun?: { ctrl: AbortController; done: Promise<JobOutcome> };
     private dmLastProgress = 0;
-    /** used tags of the settings (dropdowns of the rule table ask often) */
-    private oldTagCache?: { at: number; source: string; inventory: OldTagInventory };
-    /** tags stored in the old database (expensive: cached for a minute) */
-    private pointTagCache?: { at: number; ident: string; uses: LegacyTagUse[]; error?: string };
+    /**
+     * Used tags of the settings and of the old database. Every cell of the rule table asks for them (two requests per
+     * row), so concurrent requests share one computation (ADR-0006, extension 5).
+     */
+    private readonly settingsTags = new SharedCache<OldTagInventory>(() => Date.now(), 30_000);
+    private readonly pointTags = new SharedCache<LegacyTagUse[]>(() => Date.now(), 600_000, 60_000);
 
     public constructor(options: Partial<utils.AdapterOptions> = {}) {
         super({ ...options, name: 'influx-v3' });
@@ -632,6 +637,9 @@ export class InfluxV3Adapter extends utils.Adapter {
         if (id.startsWith('enum.rooms.') || id.startsWith('enum.functions.')) {
             this.scheduleEnumReload();
             return;
+        }
+        if ((obj?.common as { custom?: unknown } | undefined)?.custom || this.registry.has(id)) {
+            this.settingsTags.invalidate(); // used tags of the migration
         }
         // system.* states (e.g. system.adapter.x.0.memRss) can be logged too, so no prefix filter here
         const custom = this.customOf(obj);
@@ -1796,28 +1804,26 @@ export class InfluxV3Adapter extends utils.Adapter {
      *
      * @param sourceRaw influxdb instance or '' for all
      * @param includePointsRaw read the old database (default: saved option)
+     * @param waitForPointsMs how long to wait for the old database; afterwards the answer uses the settings (and an
+     *     older old-database result) while the one read continues in the background
      */
     private async oldTags(
         sourceRaw: unknown,
         includePointsRaw?: unknown,
+        waitForPointsMs = Number.POSITIVE_INFINITY,
     ): Promise<{ inventory: OldTagInventory; notes: string[] }> {
         const source = typeof sourceRaw === 'string' && /^influxdb\.\d+$/.test(sourceRaw) ? sourceRaw : '';
         const native = this.config as unknown as Record<string, unknown>;
         const includePoints =
             typeof includePointsRaw === 'boolean' ? includePointsRaw : native.migrationIncludeOldPoints !== false;
-        const now = Date.now();
-        let settings: OldTagInventory;
-        if (this.oldTagCache && this.oldTagCache.source === source && now - this.oldTagCache.at < 5000) {
-            settings = this.oldTagCache.inventory;
-        } else {
+        const settings = await this.settingsTags.get(source, async () => {
             const view = await this.getObjectViewAsync('system', 'custom', {});
             const rows = ((view?.rows ?? []) as unknown as { id: string; value: Record<string, unknown> }[]).map(r => ({
                 id: r.id,
                 custom: r.value ?? {},
             }));
-            settings = mergeInventories(collectOldTags(rows, source), collectInstanceTags(rows, this.namespace));
-            this.oldTagCache = { at: now, source, inventory: settings };
-        }
+            return mergeInventories(collectOldTags(rows, source), collectInstanceTags(rows, this.namespace));
+        });
         const notes: string[] = [];
         if (!includePoints) {
             return { inventory: settings, notes };
@@ -1826,26 +1832,56 @@ export class InfluxV3Adapter extends utils.Adapter {
         if (validateSource(db).length) {
             return { inventory: settings, notes }; // no old database configured
         }
-        const ident = JSON.stringify([db.version, db.url, db.database, db.org, db.bucket]);
-        if (!this.pointTagCache || this.pointTagCache.ident !== ident || now - this.pointTagCache.at > 60_000) {
+        const ident = JSON.stringify([db.version, db.url, db.database, db.retentionPolicy, db.org, db.bucket]);
+        const reading = this.pointTags.get(ident, async () => {
             const reader = createLegacyReader(db);
             try {
-                this.pointTagCache = { at: now, ident, uses: await reader.tagInventory() };
-            } catch (e) {
-                this.pointTagCache = { at: now, ident, uses: [], error: e instanceof Error ? e.message : redact(e) };
+                return await reader.tagInventory();
             } finally {
                 reader.close();
             }
+        });
+        let uses: LegacyTagUse[] | undefined;
+        if (waitForPointsMs === Number.POSITIVE_INFINITY) {
+            try {
+                uses = await reading;
+            } catch (e) {
+                notes.push(`Tags of the old database not read: ${e instanceof Error ? e.message : redact(e)}`);
+            }
+        } else {
+            uses = (await this.within(reading, waitForPointsMs)) ?? this.pointTags.peek(ident);
+            if (!uses) {
+                notes.push('Tags of the old database are still being read');
+            }
         }
-        if (this.pointTagCache.error) {
-            notes.push(`Tags of the old database not read: ${this.pointTagCache.error}`);
+        if (!uses) {
             return { inventory: settings, notes };
         }
         const points: OldTagInventory = { keys: new Map() };
-        for (const u of this.pointTagCache.uses) {
+        for (const u of uses) {
             addToInventory(points, u.key, u.value, u.measurements ?? 0, 'points');
         }
         return { inventory: mergeInventories(settings, points), notes };
+    }
+
+    /**
+     * Result of a promise if it settles within the time, else undefined (the promise keeps running; a failure is
+     * swallowed here - the cache remembers it).
+     */
+    private within<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+        return new Promise(resolve => {
+            let settled = false;
+            const timer: { handle?: ioBroker.Timeout } = {};
+            const finish = (v: T | undefined): void => {
+                if (!settled) {
+                    settled = true;
+                    this.clearTimeout(timer.handle);
+                    resolve(v);
+                }
+            };
+            timer.handle = this.setTimeout(() => finish(undefined), ms);
+            promise.then(finish, () => finish(undefined));
+        });
     }
 
     /** Names of all ioBroker rooms or functions (system language) */
@@ -1934,7 +1970,13 @@ export class InfluxV3Adapter extends utils.Adapter {
     /** Options of the "old key" column: keys of the old custom tags */
     private async oldTagKeyOptions(message: unknown): Promise<{ value: string; label: string }[]> {
         const m = (message ?? {}) as { source?: unknown; includeOldPoints?: unknown };
-        const inv = (await this.oldTags(m.source, m.includeOldPoints)).inventory;
+        let inv: OldTagInventory;
+        try {
+            inv = (await this.oldTags(m.source, m.includeOldPoints, 2000)).inventory;
+        } catch (e) {
+            this.log.debug(`Old tag keys not available: ${redact(e)}`);
+            return []; // a dropdown needs a list, never an error object
+        }
         return [...inv.keys.values()]
             .sort((a, b) => a.key.localeCompare(b.key))
             .map(e => ({
@@ -1945,15 +1987,31 @@ export class InfluxV3Adapter extends utils.Adapter {
 
     /** Options of the "old values" column: values of the selected old key */
     private async oldTagValueOptions(message: unknown): Promise<{ value: string; label: string }[]> {
-        const m = (message ?? {}) as { source?: unknown; key?: unknown; includeOldPoints?: unknown };
+        const m = (message ?? {}) as {
+            source?: unknown;
+            key?: unknown;
+            includeOldPoints?: unknown;
+            selected?: unknown;
+        };
         const key = typeof m.key === 'string' ? m.key.trim().toLowerCase() : '';
-        const entry = key ? (await this.oldTags(m.source, m.includeOldPoints)).inventory.keys.get(key) : undefined;
-        if (!entry) {
-            return [];
+        let entry: InventoryKey | undefined;
+        try {
+            entry = key ? (await this.oldTags(m.source, m.includeOldPoints, 2000)).inventory.keys.get(key) : undefined;
+        } catch (e) {
+            this.log.debug(`Old tag values not available: ${redact(e)}`);
         }
-        return [...entry.values.keys()]
-            .sort((a, b) => a.localeCompare(b))
-            .map(value => ({ value, label: `${value} (${describeUse(entry, value)})` }));
+        const options = entry
+            ? [...entry.values.keys()]
+                  .sort((a, b) => a.localeCompare(b))
+                  .map(value => ({ value, label: `${value} (${describeUse(entry, value)})` }))
+            : [];
+        // values already selected in the row always get an option, so their chips have a label
+        for (const v of ruleValues(m.selected)) {
+            if (!options.some(o => o.value === v)) {
+                options.push({ value: v, label: `${v} (not used any more)` });
+            }
+        }
+        return options;
     }
 
     /** "Take over old tags": appends the rule rows that are still needed (sendTo `useNative`) */

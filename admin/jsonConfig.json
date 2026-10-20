@@ -1910,7 +1910,7 @@
                             "noTranslation": true,
                             "title": "Old values (none = every value)",
                             "command": "getOldTagValues",
-                            "jsonData": "{\"source\": ${JSON.stringify(globalData.migrationSource || '')}, \"key\": ${JSON.stringify(data.fromKey || '')}, \"includeOldPoints\": ${globalData.migrationIncludeOldPoints !== false}}",
+                            "jsonData": "{\"source\": ${JSON.stringify(globalData.migrationSource || '')}, \"key\": ${JSON.stringify(data.fromKey || '')}, \"includeOldPoints\": ${globalData.migrationIncludeOldPoints !== false}, \"selected\": ${JSON.stringify(data.fromValue || [])}}",
                             "alsoDependsOn": [
                                 "fromKey"
                             ]

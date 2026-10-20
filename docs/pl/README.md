@@ -330,6 +330,7 @@ lat mogą trafić na limit serwera `--query-file-limit` (zwiększ go albo pytaj 
 | pusta historia po zmianie tabeli/trybu | stare dane zostają w starej tabeli – odczytaj je bezpośrednio przez SQL |
 | za reverse proxy | dodaj prefiks ścieżki do URL (`https://host/influx`) |
 | proxy HTTP | nieobsługiwane w 0.1.0 |
+| Tabela reguł z wieloma wierszami: *Stare wartości* ładują się wolno | używane tagi są odczytywane raz i współdzielone przez wszystkie komórki (stara baza: pamięć podręczna 10 min, komórka czeka na nią najwyżej 2 s); pierwsze otwarcie po starcie może pokazać tylko wartości z ustawień – otwórz zakładkę ponownie po chwili |
 
 ## Rozwój i testy
 
