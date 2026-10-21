@@ -134,6 +134,25 @@ function extractMessage(parsed) {
     }
     return undefined;
 }
+/**
+ * Maps the answer of a permission probe.
+ *
+ * @param res HTTP answer
+ * @param allowed the answer means "allowed"
+ * @param missing the answer means "the database does not exist"
+ */
+function probeResult(res, allowed, missing) {
+    if (allowed) {
+        return { status: 'ok', httpStatus: res.status };
+    }
+    if (res.status === 401 || res.status === 403) {
+        return { status: 'denied', httpStatus: res.status, message: `HTTP ${res.status}` };
+    }
+    if (missing) {
+        return { status: 'missing', httpStatus: res.status };
+    }
+    return { status: 'error', httpStatus: res.status, message: (0, redact_1.redact)(`HTTP ${res.status} ${res.body.slice(0, 200)}`) };
+}
 class InfluxV3Client {
     opts;
     agent;
@@ -319,6 +338,34 @@ class InfluxV3Client {
         }
         catch (e) {
             return { ok: false, status: 0, latencyMs: Date.now() - start, error: (0, redact_1.redact)(e) };
+        }
+    }
+    /**
+     * Read permission on the configured database: `SELECT 1` (creates nothing; HTTP 404 = the database does not
+     * exist yet).
+     */
+    async probeRead() {
+        try {
+            const res = await this.request('POST', this.path('/api/v3/query_sql'), JSON.stringify({ db: this.opts.database, q: 'SELECT 1', format: 'json' }), { 'Content-Type': 'application/json' });
+            return probeResult(res, res.status === 200, /database not found/i.test(res.body));
+        }
+        catch (e) {
+            return { status: 'error', httpStatus: 0, message: (0, redact_1.redact)(e) };
+        }
+    }
+    /**
+     * Write permission without writing data: InfluxDB 3 refuses an empty write with HTTP 400 "incoming write was
+     * empty" after authentication and authorisation. Caution (measured on Core 3.12.1): even an empty write creates a
+     * missing database - only probe a database that exists or that the adapter writes to anyway.
+     */
+    async probeWrite() {
+        try {
+            const res = await this.request('POST', this.path('/api/v3/write_lp', { db: this.opts.database, precision: 'millisecond' }), '', { 'Content-Type': 'text/plain; charset=utf-8' });
+            const accepted = res.status === 204 || res.status === 200 || (res.status === 400 && /empty/i.test(res.body));
+            return probeResult(res, accepted, res.status === 404 && /database/i.test(res.body));
+        }
+        catch (e) {
+            return { status: 'error', httpStatus: 0, message: (0, redact_1.redact)(e) };
         }
     }
     /**

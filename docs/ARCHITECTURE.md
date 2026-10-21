@@ -30,6 +30,7 @@ ioBroker ───────────────────────�
 | `Spool` (`lib/spool.ts`) | durable batch files (`tmp` + `fsync` + `rename`), recovery, age/size limits | fs |
 | `HistoryService` (`lib/historyService.ts`) | translates ioBroker `getHistory` options into parameterised SQL (`date_bin`, `selector_min/max`, `approx_percentile_cont`), maps rows to `{val, ts, ack, q, from}` | pure SQL builder + I/O |
 | `QueryService` (`lib/queryService.ts`) | read-only guard for user SQL/InfluxQL, row/size limits, sender allow-list | pure guard + I/O |
+| `Health` (`lib/health.ts`) | connection state from `/ping`, the database probes (`SELECT 1`, empty write) and the state of the live writes – works with Enterprise database tokens that may not read `/ping` (ADR-0002) | yes |
 | `Observability` (`lib/observability.ts`) | counters, last success/error times, periodic (10 s) publication to `info.*`, never written to InfluxDB unless explicitly enabled | yes |
 | `Migration` (`lib/migration.ts`) | explicit, previewable copy of `influxdb.N` per-state settings into `influx-v3.N`; custom tags translated by the tag rules | pure mapping + I/O on user request |
 | `TagMapping` (`lib/tagMapping.ts`) | tag rules (old key/value → catalog key/value, remove), catalog spelling, conflicts — shared by both migrations (ADR-0006) | yes |

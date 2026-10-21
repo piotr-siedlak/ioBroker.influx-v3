@@ -109,7 +109,27 @@ docker exec influxdb3 influxdb3 create database --retention-period 365d --token 
 ```
 
 Bez jawnego `create database` baza zostanie utworzona przy pierwszym zapisie z **nieograniczoną** retencją.
-W **Enterprise** zamiast tokenu administracyjnego utwórz token zasobu z prawem odczytu i zapisu tylko dla tej bazy.
+W **Enterprise** zamiast tokenu administracyjnego użyj tokenu bazy (minimalne uprawnienia):
+
+```bash
+influxdb3 create token --permission "db:iobroker:read,write" --name "ioBroker influx-v3" --token <TOKEN_ADMINA>
+```
+
+### Uprawnienia tokenu
+
+| Funkcja adaptera | Wymaga |
+| --- | --- |
+| Zapis, import danych historycznych | zapisu do bazy |
+| Historia (`getHistory`, wykresy), `query`, kontrola schematu | odczytu bazy |
+| Stan połączenia (`info.connection`) | nic więcej – `/ping`, jeśli token może go czytać, w przeciwnym razie baza (niżej) |
+| Edycja i wersja (`info.serverVersion`) | `/ping` (token administracyjny albo w Enterprise `system:ping:read`) – opcjonalnie |
+| *Utwórz bazę*, wyświetlanie retencji | token administracyjny – opcjonalnie |
+
+**Stan połączenia:** `info.connection` jest prawdą, gdy adapter może wykonywać swoją pracę. Najpierw pyta `/ping`.
+Token bazy w Enterprise dostaje tam 403, więc adapter sprawdza wtedy samą bazę: `SELECT 1` (wymaga odczytu; niczego
+nie tworzy), a dla tokenu tylko do zapisu niedawny udany zapis albo pusty zapis (autoryzowany, nic nie jest
+zapisywane). Dopóki serwer odrzuca zapisy adaptera, stan pozostaje fałszem. *Sprawdź połączenie* w ustawieniach
+instancji pokazuje osobno dostępność serwera, `/ping`, odczyt i zapis.
 
 Test połączenia z konsoli:
 
@@ -383,6 +403,7 @@ pliki (darmowa licencja do użytku domowego).
 | Objaw | Przyczyna / działanie |
 | --- | --- |
 | `info.connection` = false, w logu „authentication failed” | zły lub wygasły token; Core: `influxdb3 create token --admin` |
+| instancja żółta, choć dane są zapisywane; w logu co ok. 60 s „Connection to InfluxDB 3 lost: authentication failed” (wersje ≤ 0.2.0) | token bazy w Enterprise nie może czytać `/ping` – zaktualizuj adapter: połączenie jest wtedy sprawdzane przez bazę. *Sprawdź połączenie* pokazuje, co token może |
 | „Adding a new database would exceed limit of 5 databases” | Core pozwala na 5 baz – użyj istniejącej |
 | stan w `info.conflicts` | typ wartości różni się od typu tabeli → inna tabela albo *zapisz jako* |
 | „table limit reached” | tryb per-stan w Core (2000 tabel) → przełącz na tryb grupowy |
@@ -413,6 +434,14 @@ scripts/influx3-test-server.sh stop && scripts/legacy-influx-test-server.sh stop
 ## Lista zmian
 
 Pełna lista (po angielsku): [README.md → Changelog](../../README.md#changelog).
+
+### W przygotowaniu
+
+* Stan połączenia z tokenami bazy w Enterprise: odmowa `/ping` (403) nie oznacza już „utraty połączenia” – adapter
+  sprawdza wtedy odczyt/zapis bazy (`SELECT 1`, niedawny zapis albo pusty zapis; nic nie jest tworzone ani
+  zapisywane). Zapisy odrzucane przez serwer utrzymują stan fałszu (bez przełączania tam i z powrotem)
+* *Sprawdź połączenie* pokazuje osobno dostępność, `/ping` (edycja, wersja), odczyt i zapis bazy oraz retencję;
+  zgłasza błąd tylko wtedy, gdy zapis nie może działać
 
 ### 0.2.0 (2026-10-20)
 

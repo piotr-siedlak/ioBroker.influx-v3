@@ -158,6 +158,60 @@ tests.integration(path.join(__dirname, '..'), {
             });
         });
 
+        // InfluxDB 3 Enterprise answers /ping and /health with 403 for a database token (db:NAME:read,write) - the proxy
+        // imitates that in front of the test server; writes and queries pass through
+        (URL ? suite : () => undefined)('Database token without /ping permission', getHarness => {
+            let proxy;
+            before(async function () {
+                const target = new globalThis.URL(URL);
+                proxy = http.createServer((req, res) => {
+                    if (/^\/(ping|health)\b/.test(req.url || '')) {
+                        req.resume();
+                        res.writeHead(403, { 'content-type': 'application/json' });
+                        res.end('{"error":"permission denied"}');
+                        return;
+                    }
+                    const up = http.request({ hostname: target.hostname, port: target.port, path: req.url, method: req.method, headers: req.headers }, r => {
+                        res.writeHead(r.statusCode || 502, r.headers);
+                        r.pipe(res);
+                    });
+                    up.on('error', () => {
+                        res.writeHead(502);
+                        res.end();
+                    });
+                    req.pipe(up);
+                });
+                await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve));
+            });
+            after(() => proxy && proxy.close());
+
+            it('stays connected, the connection test explains the token', async function () {
+                this.timeout(90000);
+                const harness = getHarness();
+                const id = `${BASE}.tokenProbe`;
+                await harness.objects.setObjectAsync(id, stateObject('number', { 'influx-v3.0': { enabled: true } }));
+                await harness.changeAdapterConfig('influx-v3', {
+                    native: { url: `http://127.0.0.1:${proxy.address().port}`, token: TOKEN, database: DB, pingIntervalSec: 10, flushIntervalMs: 200 },
+                });
+                await harness.startAdapterAndWait();
+                const connected = async () => (await harness.states.getStateAsync('influx-v3.0.info.connection'))?.val === true;
+                await waitFor(connected, 20000);
+                assert.equal((await harness.states.getStateAsync('influx-v3.0.info.serverVersion')).val, 'unknown (version not readable with this token)');
+                assert.ok(harness.getLogs().some(l => /The token may not read \/ping/.test(l.message)));
+                await harness.states.setStateAsync(id, { val: 1.5, ack: true });
+                await waitFor(async () => (await sql(`SELECT value FROM numeric_states WHERE state_id = '${id}'`)).length === 1, 20000);
+                // two periodic checks later (ping interval 10 s) still connected - before, /ping turned it to false
+                await sleep(21000);
+                assert.equal(await connected(), true);
+                assert.ok(!harness.getLogs().some(l => /Connection to InfluxDB 3 lost/.test(l.message)), 'no flapping');
+                const report = await sendTo(harness, 'testConnection', {});
+                assert.match(report.result, /^Server reachable \(\d+ ms\)\. This token may not read \/ping \(database token\)/);
+                assert.match(report.result, /Database "iobharness": exists, reading allowed/);
+                assert.match(report.result, /Writing to "iobharness": allowed/);
+                await harness.stopAdapter();
+            });
+        });
+
         (URL ? suite : () => undefined)('End-to-end with InfluxDB 3', getHarness => {
             let harness;
             const objects = {

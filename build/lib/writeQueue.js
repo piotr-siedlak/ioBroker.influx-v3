@@ -356,9 +356,9 @@ class WriteQueue {
         }
         this.forget(batch);
     }
-    setConnection(ok, error) {
+    setConnection(ok, error, kind) {
         if (this.lastConnectionOk !== ok || !ok) {
-            this.events.connection(ok, error);
+            this.events.connection(ok, error, kind);
         }
         this.lastConnectionOk = ok;
     }
@@ -428,7 +428,7 @@ class WriteQueue {
                 this.failures++;
                 this.circuitUntil = this.timers.now() + this.opts.authRetryMs;
                 this.halfOpen = false;
-                this.setConnection(false, result.message);
+                this.setConnection(false, result.message, result.kind);
                 this.events.log('error', `InfluxDB refused the write (${result.status}: ${result.message}) - data is kept, next attempt in ${Math.round(this.opts.authRetryMs / 1000)} s`);
                 return;
             }
@@ -440,7 +440,7 @@ class WriteQueue {
                 }
                 this.circuitUntil = this.timers.now() + delay;
                 this.halfOpen = false;
-                this.setConnection(false, result.message);
+                this.setConnection(false, result.message, 'transient');
                 this.events.log(this.failures === 1 ? 'warn' : 'debug', `Write failed (${result.status ?? 'network'}: ${result.message}) - retry ${this.failures} in ${delay} ms`);
                 return;
             }

@@ -106,7 +106,27 @@ docker exec influxdb3 influxdb3 create database --retention-period 365d --token 
 ```
 
 Without an explicit `create database` the database is created by the first write with **infinite** retention.
-On **Enterprise**, create a resource token with read+write permission for the one database instead of an admin token.
+On **Enterprise**, use a database token instead of an admin token (least privilege):
+
+```bash
+influxdb3 create token --permission "db:iobroker:read,write" --name "ioBroker influx-v3" --token <ADMIN_TOKEN>
+```
+
+### Token permissions
+
+| Function of the adapter | Needs |
+| --- | --- |
+| Logging, import of historical data | write on the database |
+| History (`getHistory`, charts), `query`, schema checks | read on the database |
+| Connection state (`info.connection`) | nothing extra – `/ping` when the token may read it, otherwise the database (see below) |
+| Edition and version (`info.serverVersion`) | `/ping` (admin token, or Enterprise `system:ping:read`) – optional |
+| *Create database*, retention display | admin token – optional |
+
+**Connection state:** `info.connection` is true when the adapter can do its job. It asks `/ping` first. An Enterprise
+database token gets 403 there, so the adapter then checks the database itself: `SELECT 1` (needs read; creates
+nothing), and for a write-only token a recent successful write or an empty write (authorised, nothing written).
+While the server refuses the adapter's writes, the state stays false. *Check connection* in the instance settings
+shows reachability, `/ping`, reading and writing separately.
 
 ## Instance configuration
 
@@ -361,6 +381,7 @@ InfluxDB 3 Enterprise, whose compaction merges old files (free licence for at-ho
 | Symptom | Cause / action |
 | --- | --- |
 | `info.connection` false, log "authentication failed" | wrong/expired token; Core: `influxdb3 create token --admin` |
+| instance yellow although data is written; log "Connection to InfluxDB 3 lost: authentication failed" about every 60 s (versions ≤ 0.2.0) | an Enterprise database token may not read `/ping` – update the adapter: the connection is then checked through the database. *Check connection* shows what the token may do |
 | "Adding a new database would exceed limit of 5 databases" | Core allows 5 databases – reuse one |
 | state listed in `info.conflicts` | its value type differs from the table's type → choose another table or *store as* |
 | "table limit reached" | per-state mode on Core (2 000 tables) → switch to grouped mode |
@@ -397,6 +418,14 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
+### **WORK IN PROGRESS**
+
+* (Piotr Siedlak) Connection state with Enterprise database tokens: `/ping` refused (403) no longer means "connection
+  lost" – the adapter checks reading/writing the database instead (`SELECT 1`, a recent write or an empty write;
+  nothing is created or written). Writes refused by the server keep the state false (no flapping)
+* (Piotr Siedlak) *Check connection* reports reachability, `/ping` (edition, version), reading and writing the
+  database and the retention separately; it fails only when logging cannot work
+
 ### 0.2.0 (2026-10-20)
 
 * (Piotr Siedlak) **Tag catalog:** tag keys, their allowed values and defaults are defined centrally in the instance

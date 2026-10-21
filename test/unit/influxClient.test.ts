@@ -143,6 +143,55 @@ describe('InfluxV3Client', () => {
             assert.ok(!JSON.stringify(p).includes('apiv3_testtoken'));
         });
 
+        it('probeRead: SELECT 1 on the database - ok, missing, denied, error', async () => {
+            const answers: [number, string][] = [
+                [200, '[{"Int64(1)":1}]'],
+                [404, '{"error":"query error: database not found: iob"}'],
+                [403, '{"error":"forbidden"}'],
+                [500, 'boom'],
+            ];
+            const c = client();
+            const got: string[] = [];
+            for (const [status, body] of answers) {
+                respond = (_req, res) => {
+                    res.writeHead(status);
+                    res.end(body);
+                };
+                got.push((await c.probeRead()).status);
+            }
+            assert.equal(last.method, 'POST');
+            assert.equal(last.url, '/api/v3/query_sql');
+            assert.deepEqual(JSON.parse(last.body.toString()), { db: 'iob', q: 'SELECT 1', format: 'json' });
+            c.close();
+            assert.deepEqual(got, ['ok', 'missing', 'denied', 'error']);
+        });
+
+        it('probeWrite: an empty write - 400 "empty" means allowed, 401/403 denied', async () => {
+            const answers: [number, string][] = [
+                [400, 'incoming write was empty'],
+                [204, ''],
+                [401, '{"error": "the request was not authenticated"}'],
+                [404, '{"error":"database not found"}'],
+                [400, 'line protocol parsing error'],
+            ];
+            const c = client();
+            const got: string[] = [];
+            for (const [status, body] of answers) {
+                respond = (_req, res) => {
+                    res.writeHead(status);
+                    res.end(body);
+                };
+                got.push((await c.probeWrite()).status);
+            }
+            assert.match(last.url ?? '', /^\/api\/v3\/write_lp\?db=iob&precision=millisecond/);
+            assert.equal(last.body.length, 0, 'nothing is written');
+            c.close();
+            assert.deepEqual(got, ['ok', 'ok', 'denied', 'missing', 'error']);
+            const down = client({ url: 'http://127.0.0.1:1' });
+            assert.equal((await down.probeRead()).status, 'error');
+            down.close();
+        });
+
         it('write uses /api/v3/write_lp with db, precision=millisecond and gzip', async () => {
             respond = (_req, res) => {
                 res.writeHead(204);

@@ -30,7 +30,8 @@ export interface QueueEvents {
     written(count: number): void;
     rejected(items: { line: string; message: string }[]): void;
     dropped(count: number, reason: string): void;
-    connection(ok: boolean, error?: string): void;
+    /** `kind` of a failure: auth/config = the server refuses the writes, transient = not reachable or overloaded */
+    connection(ok: boolean, error?: string, kind?: 'auth' | 'config' | 'transient'): void;
     log(level: 'debug' | 'info' | 'warn' | 'error', message: string): void;
 }
 
@@ -444,9 +445,9 @@ export class WriteQueue {
         this.forget(batch);
     }
 
-    private setConnection(ok: boolean, error?: string): void {
+    private setConnection(ok: boolean, error?: string, kind?: 'auth' | 'config' | 'transient'): void {
         if (this.lastConnectionOk !== ok || !ok) {
-            this.events.connection(ok, error);
+            this.events.connection(ok, error, kind);
         }
         this.lastConnectionOk = ok;
     }
@@ -518,7 +519,7 @@ export class WriteQueue {
                 this.failures++;
                 this.circuitUntil = this.timers.now() + this.opts.authRetryMs;
                 this.halfOpen = false;
-                this.setConnection(false, result.message);
+                this.setConnection(false, result.message, result.kind);
                 this.events.log(
                     'error',
                     `InfluxDB refused the write (${result.status}: ${result.message}) - data is kept, next attempt in ${Math.round(this.opts.authRetryMs / 1000)} s`,
@@ -535,7 +536,7 @@ export class WriteQueue {
                 }
                 this.circuitUntil = this.timers.now() + delay;
                 this.halfOpen = false;
-                this.setConnection(false, result.message);
+                this.setConnection(false, result.message, 'transient');
                 this.events.log(
                     this.failures === 1 ? 'warn' : 'debug',
                     `Write failed (${result.status ?? 'network'}: ${result.message}) - retry ${this.failures} in ${delay} ms`,

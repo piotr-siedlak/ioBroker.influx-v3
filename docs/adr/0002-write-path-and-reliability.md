@@ -37,6 +37,27 @@ Status: accepted (2026-10-19)
   it is sent and deleted after the server acknowledged it. After a crash all unacknowledged batches are
   replayed. Data still in the open batch (≤ `flushIntervalMs`) can be lost.
 
+### Connection state (`info.connection`, added after 0.2.0)
+
+`info.connection` means "the adapter can do its job", not "`/ping` answers": InfluxDB 3 Enterprise answers `/ping`
+and `/health` with 403 for a database token (`db:NAME:read,write`), the recommended least-privilege token, which
+writes and reads without problems. A user's instance was therefore shown as disconnected every 60 s while it wrote
+data (the write queue set it to true, the periodic `/ping` back to false).
+
+* `/ping` answers 2xx → connected (edition and version known).
+* Network error, timeout, 5xx → not connected.
+* `/ping` answers 401/403 → the server is reachable; the database decides: `SELECT 1` on the configured database
+  (200, or 404 "database not found" = not created yet → connected; creates nothing). If reading is refused too
+  (write-only token): a successful write of the live queue within 2 × the check interval, else an **empty write**
+  (InfluxDB 3 answers 400 "incoming write was empty" after authorisation; nothing is written – but it creates a
+  missing database, so it is only used for the configured database, and *Check connection* only probes a database
+  that exists).
+* While the server refuses the queue's writes (401/403/404), the state stays false whatever the probes say – no
+  flapping. The queue reports the kind of failure (`auth`/`config` vs. `transient`).
+
+The decision is a pure function (`lib/health.ts`), tested with Core behind a proxy that refuses `/ping`, reading or
+writing like Enterprise does.
+
 ### Guarantees
 
 * **At-least-once** within the limits above. Not exactly-once: a batch acknowledged by the server but not yet

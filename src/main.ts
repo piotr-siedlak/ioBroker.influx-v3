@@ -43,7 +43,8 @@ import {
     mapHistoryRows,
     normalizeHistoryOptions,
 } from './lib/historyService';
-import { HttpError, InfluxV3Client } from './lib/influxClient';
+import { assessHealth, type Health, needsDatabaseCheck, needsWriteProbe } from './lib/health';
+import { HttpError, InfluxV3Client, type PingResult, type ProbeResult } from './lib/influxClient';
 import { createLegacyReader, type LegacyPoint, type LegacySourceConfig, type LegacyTagUse } from './lib/legacySource';
 import { type LpRecord, LineProtocolError, serialize, type FieldValue } from './lib/lineProtocol';
 import {
@@ -163,6 +164,14 @@ export class InfluxV3Adapter extends utils.Adapter {
     private statsTimer?: ioBroker.Interval;
     private enumReloadTimer?: ioBroker.Timeout;
     private influxConnected = false;
+    /** time of the last successful write of the live queue */
+    private lastWriteOk?: number;
+    /** the server refuses the writes of the live queue (401/403/404) */
+    private writeRefused?: string;
+    /** the token may not read /ping (database token) - logged once */
+    private pingDeniedLogged = false;
+    /** the token may not read the database - logged once */
+    private readDeniedLogged = false;
     /** running import of historical data */
     private dmRun?: { ctrl: AbortController; done: Promise<JobOutcome> };
     /** first live value per state - the import of historical data ends there (ADR-0006, extension 7) */
@@ -245,13 +254,21 @@ export class InfluxV3Adapter extends utils.Adapter {
                 written: n => {
                     this.stats.counters.written += n;
                     this.stats.lastWrite = Date.now();
+                    this.lastWriteOk = this.stats.lastWrite;
                 },
                 rejected: items => this.onRejected(items),
                 dropped: (n, reason) => {
                     this.stats.drop(n, reason);
                     this.log.warn(`${n} record(s) dropped: ${reason}`);
                 },
-                connection: (ok, error) => this.setConnected(ok, error),
+                connection: (ok, error, kind) => {
+                    if (ok) {
+                        this.writeRefused = undefined;
+                    } else if (kind === 'auth' || kind === 'config') {
+                        this.writeRefused = error;
+                    }
+                    this.setConnected(ok, error);
+                },
                 log: (level, message) => this.log[level](redact(message)),
             },
             this.timers(),
@@ -409,35 +426,91 @@ export class InfluxV3Adapter extends utils.Adapter {
         }
     }
 
+    /**
+     * Health of the connection, judged by what the adapter needs (ADR-0002): /ping first; when the token may not read
+     * /ping (Enterprise database token), reading the database (`SELECT 1`), a recent successful write or - as the last
+     * resort - an empty write.
+     *
+     * @param client client to check (default: the instance's)
+     * @param cfg settings of that client
+     */
+    private async checkHealth(
+        client: InfluxV3Client,
+        cfg: InstanceConfig = this.cfg,
+    ): Promise<{ health: Health; ping: PingResult; read?: ProbeResult; write?: ProbeResult }> {
+        const ping = await client.ping();
+        const base = {
+            ping,
+            lastWriteOk: client === this.client ? this.lastWriteOk : undefined,
+            writeRefused: client === this.client ? this.writeRefused : undefined,
+            now: Date.now(),
+            recentMs: 2 * cfg.pingIntervalSec * 1000,
+        };
+        if (cfg.edition === 'cloud' || !needsDatabaseCheck(ping)) {
+            return { health: assessHealth(base), ping };
+        }
+        const read = await client.probeRead();
+        const write = needsWriteProbe({ ...base, read }) ? await client.probeWrite() : undefined;
+        return { health: assessHealth({ ...base, read, write }), ping, read, write };
+    }
+
+    /** Logs once what a token without /ping or read permission means. */
+    private explainToken(health: Health): void {
+        if (!health.pingAllowed && health.ok && !this.pingDeniedLogged) {
+            this.pingDeniedLogged = true;
+            this.log.info(
+                'The token may not read /ping (InfluxDB 3 Enterprise database token) - the connection is checked through the database; edition and version are not shown',
+            );
+        }
+        if (health.canRead === false && !this.readDeniedLogged) {
+            this.readDeniedLogged = true;
+            this.log.warn(
+                `The token may not read database "${this.cfg.database}" - logging works, but history (getHistory, charts), queries and schema checks need read permission (Enterprise: db:${this.cfg.database}:read,write)`,
+            );
+        }
+    }
+
     private async connect(): Promise<void> {
         if (!this.client) {
             return;
         }
-        const ping = await this.client.ping();
-        if (!ping.ok) {
-            this.setConnected(false, ping.error ?? `HTTP ${ping.status}`);
-            this.log.warn(
-                `InfluxDB 3 not reachable at ${this.cfg.url}: ${ping.error ?? ping.status} - data is buffered`,
-            );
+        const { health, ping } = await this.checkHealth(this.client);
+        if (!health.ok) {
+            this.setConnected(false, health.error);
+            this.log.warn(`InfluxDB 3 not usable at ${this.cfg.url}: ${health.error ?? '-'} - data is buffered`);
             return;
         }
-        const edition = ping.edition ?? 'unknown';
-        this.stats.serverEdition = edition;
-        this.stats.serverVersion = ping.version ?? '';
-        await this.setStateChangedAsync('info.serverVersion', `${edition} ${ping.version ?? ''}`.trim(), true);
-        if (this.cfg.edition === 'auto' && edition === 'unknown') {
-            this.log.warn('Could not detect the InfluxDB edition from /ping - assuming the Core/Enterprise API');
-        } else if (
-            this.cfg.edition !== 'auto' &&
-            this.cfg.edition !== 'cloud' &&
-            edition !== 'unknown' &&
-            edition !== this.cfg.edition
-        ) {
-            this.log.warn(`Configured edition "${this.cfg.edition}" but the server reports "${edition}"`);
+        this.explainToken(health);
+        if (ping.ok) {
+            const edition = ping.edition ?? 'unknown';
+            this.stats.serverEdition = edition;
+            this.stats.serverVersion = ping.version ?? '';
+            await this.setStateChangedAsync('info.serverVersion', `${edition} ${ping.version ?? ''}`.trim(), true);
+            if (this.cfg.edition === 'auto' && edition === 'unknown') {
+                this.log.warn('Could not detect the InfluxDB edition from /ping - assuming the Core/Enterprise API');
+            } else if (
+                this.cfg.edition !== 'auto' &&
+                this.cfg.edition !== 'cloud' &&
+                edition !== 'unknown' &&
+                edition !== this.cfg.edition
+            ) {
+                this.log.warn(`Configured edition "${this.cfg.edition}" but the server reports "${edition}"`);
+            }
+        } else {
+            // a database token cannot read /ping: only the configured edition is known
+            this.stats.serverEdition = this.cfg.edition === 'auto' ? 'unknown' : this.cfg.edition;
+            this.stats.serverVersion = '';
+            await this.setStateChangedAsync(
+                'info.serverVersion',
+                `${this.stats.serverEdition} (version not readable with this token)`,
+                true,
+            );
         }
         this.setConnected(true);
-        await this.refreshSchema();
-        if (this.cfg.edition !== 'cloud') {
+        if (health.canRead !== false) {
+            await this.refreshSchema();
+        }
+        if (this.cfg.edition !== 'cloud' && health.canRead !== false) {
             const retention = await this.client.getRetentionMs();
             if (retention === undefined) {
                 this.log.info(`Database "${this.cfg.database}": retention infinite`);
@@ -466,15 +539,16 @@ export class InfluxV3Adapter extends utils.Adapter {
         if (!this.client || this.stopping) {
             return;
         }
-        const ping = await this.client.ping();
-        if (ping.ok) {
+        const { health } = await this.checkHealth(this.client);
+        if (health.ok) {
             const wasConnected = this.influxConnected;
+            this.explainToken(health);
             this.setConnected(true);
-            if (!wasConnected) {
+            if (!wasConnected && health.canRead !== false) {
                 await this.refreshSchema();
             }
         } else {
-            this.setConnected(false, ping.error);
+            this.setConnected(false, health.error);
         }
     }
 
@@ -1616,33 +1690,85 @@ export class InfluxV3Adapter extends utils.Adapter {
         registerSecret(config.token);
         const client = this.createClient(config);
         try {
-            const ping = await client.ping();
-            if (!ping.ok) {
-                return this.reply(msg, { error: `Connection failed: ${ping.error ?? `HTTP ${ping.status}`}` });
-            }
-            const lines = [`OK: InfluxDB 3 ${ping.edition ?? ''} ${ping.version ?? ''} (${ping.latencyMs} ms)`];
-            if (config.edition !== 'cloud') {
-                try {
-                    const dbs = await client.listDatabases();
-                    lines.push(
-                        dbs.includes(config.database)
-                            ? `Database "${config.database}" exists`
-                            : `Database "${config.database}" does not exist yet - it is created by the first write`,
-                    );
-                } catch (e) {
-                    lines.push(`Database list not readable with this token (${redact(e)})`);
-                }
-                const retention = await client.getRetentionMs();
-                if (retention !== null) {
-                    lines.push(
-                        `Retention: ${retention === undefined ? 'infinite' : `${Math.round(retention / 86400000)} days`}`,
-                    );
-                }
-            }
-            this.reply(msg, { result: lines.join('\n') });
+            const report = await this.connectionReport(client, config);
+            this.reply(msg, report.ok ? { result: report.text } : { error: report.text });
         } finally {
             client.close();
         }
+    }
+
+    /**
+     * What the token may do, line by line: reachability and /ping (edition, version), reading and writing the
+     * database, retention. Fails only when the server cannot be used for logging.
+     *
+     * @param client client with the settings to test
+     * @param config the settings
+     */
+    private async connectionReport(
+        client: InfluxV3Client,
+        config: InstanceConfig,
+    ): Promise<{ ok: boolean; text: string }> {
+        const { health, ping, read, write } = await this.checkHealth(client, config);
+        const db = config.database;
+        if (!health.ok && !needsDatabaseCheck(ping)) {
+            return { ok: false, text: `Connection failed: ${health.error ?? `HTTP ${ping.status}`}` };
+        }
+        const lines = [
+            ping.ok
+                ? `OK: InfluxDB 3 ${ping.edition ?? ''} ${ping.version ?? ''} (${ping.latencyMs} ms)`.replace(
+                      / +/g,
+                      ' ',
+                  )
+                : `Server reachable (${ping.latencyMs} ms). This token may not read /ping (database token) - edition and version are not shown; the adapter does not need it.`,
+        ];
+        if (config.edition === 'cloud') {
+            return { ok: health.ok, text: lines.join('\n') };
+        }
+        const readProbe = read ?? (await client.probeRead());
+        // the write probe creates a missing database - only for one that exists (or when reading is not allowed, then
+        // the database is the one the adapter writes to anyway)
+        const writeProbe =
+            write ??
+            (readProbe.status === 'ok' || readProbe.status === 'denied' ? await client.probeWrite() : undefined);
+        switch (readProbe.status) {
+            case 'ok':
+                lines.push(`Database "${db}": exists, reading allowed (history, charts, queries)`);
+                break;
+            case 'missing':
+                lines.push(`Database "${db}" does not exist yet - it is created by the first write`);
+                break;
+            case 'denied':
+                lines.push(
+                    `Database "${db}": reading NOT allowed - logging works, but history (getHistory, charts) and queries need db:${db}:read`,
+                );
+                break;
+            default:
+                lines.push(`Database "${db}": not readable (${readProbe.message ?? readProbe.httpStatus})`);
+        }
+        let ok = health.ok;
+        if (writeProbe?.status === 'ok') {
+            lines.push(`Writing to "${db}": allowed`);
+        } else if (writeProbe?.status === 'denied') {
+            ok = false;
+            lines.push(`Writing to "${db}": NOT allowed - logging cannot work (needed: db:${db}:write)`);
+        } else if (writeProbe?.status === 'missing') {
+            ok = false;
+            lines.push(`Writing to "${db}": the database does not exist and this token may not create it`);
+        } else if (writeProbe) {
+            lines.push(`Writing to "${db}": not checked (${writeProbe.message ?? writeProbe.httpStatus})`);
+        }
+        if (readProbe.status === 'ok') {
+            const retention = await client.getRetentionMs();
+            lines.push(
+                retention === null
+                    ? 'Retention: not readable with this token (needs an admin token)'
+                    : `Retention: ${retention === undefined ? 'infinite' : `${Math.round(retention / 86400000)} days`}`,
+            );
+        }
+        if (!ok && health.error) {
+            lines.push(`Not usable: ${health.error}`);
+        }
+        return { ok, text: lines.join('\n') };
     }
 
     private async handleCreateDatabase(msg: ioBroker.Message): Promise<void> {
